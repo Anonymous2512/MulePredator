@@ -46,6 +46,7 @@ app.add_middleware(
 # --- module state, initialized on startup ---
 scorer: RealtimeScorer | None = None
 recent_alerts: deque = deque(maxlen=500)   # ring buffer of recent alerts for the dashboard
+recent_feed: deque = deque(maxlen=100)     # rolling window of ALL scored txns (clean + flagged)
 stats = {"scored": 0, "alerts": 0, "quantum_alerts": 0, "latency_sum_ms": 0.0}
 
 
@@ -109,8 +110,14 @@ def score(txn: TxnRequest) -> dict[str, Any]:
         is_pqc_protected=txn.is_pqc_protected, data_volume_mb=txn.data_volume_mb, hndl_risk=txn.hndl_risk,
     )
     result = scorer.score(t)
+    result["account_id_from"] = txn.account_id_from
+    result["account_id_to"] = txn.account_id_to
+    result["amount_inr"] = txn.amount_inr
+    result["timestamp"] = txn.timestamp.isoformat()
+
     stats["scored"] += 1
     stats["latency_sum_ms"] += result["latency_ms"]
+    recent_feed.appendleft(result)
     if result["alert"]:
         stats["alerts"] += 1
         recent_alerts.appendleft(result)
@@ -126,6 +133,14 @@ def alerts(limit: int = 50, tier: str | None = None) -> dict[str, Any]:
     if tier:
         items = [a for a in items if a["alert_tier"] == tier]
     return {"count": len(items[:limit]), "alerts": items[:limit]}
+
+
+@app.get("/feed")
+def feed(limit: int = 100) -> dict[str, Any]:
+    """Rolling window of the last 100 scored transactions, clean and
+    flagged, newest first -- what the dashboard's live queue polls."""
+    items = list(recent_feed)
+    return {"count": len(items[:limit]), "feed": items[:limit]}
 
 
 @app.get("/account/{account_id}")
