@@ -51,11 +51,20 @@ Open http://localhost:8000/docs for the interactive Swagger UI.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/score` | Score a single transaction; returns decision, tier, per-engine scores, reason, latency |
-| GET | `/alerts?limit=50&tier=high_priority` | Recent alerts feed for the dashboard |
+| POST | `/score` | Score a single transaction; returns decision, tier, per-engine scores, `cluster_details`, reason, latency |
+| GET | `/feed?limit=100` | Rolling window of the last 100 scored transactions (clean + flagged), newest first |
+| GET | `/alerts?limit=50&tier=high_priority` | Recent *flagged* alerts only |
 | GET | `/account/{account_id}` | Cached graph intelligence + live rolling state for one account |
 | GET | `/stats` | Running counters: scored, alerts, avg latency |
 | GET | `/health` | Liveness check |
+
+`cluster_details` (on `/score` and `/feed` items) is non-null when the
+transaction's **receiving** account looks like a fan-in collector: cached
+`graph_risk_score` above the signal-presence threshold with a "fan-in"
+graph reason, and 3+ distinct senders in its rolling window. It carries the
+real `collector_account_id` and `sender_account_ids`/`spokes` (with
+amounts) so the dashboard can render the actual mule cluster instead of a
+mock ring.
 
 ### Example `/score` request
 
