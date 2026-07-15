@@ -72,8 +72,7 @@ python -m venv venv
 # On Windows (Command Prompt): venv\Scripts\activate
 # On Mac/Linux: source venv/bin/activate
 
-# 4. Install dependencies
-pip install -r requirements.txt
+
 ```
 
 ### Step 2: Initialize the Pipeline
