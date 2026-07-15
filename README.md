@@ -8,16 +8,42 @@ Rather than overwhelming analysts with single-point anomalies, MulePredator eval
 
 ## 🏗️ Project Architecture
 
-- **Data Generation:** Synthesizes realistic banking streams (transactions, auth logs, TLS sessions).
-- **Detection Engines:**
-  - _Graph Engine:_ Detects structural anomalies like fan-in/fan-out and community clustering.
-  - _Cyber Engine:_ Flags account-takeover indicators like impossible travel and device churn.
-  - _Quantum Engine:_ A separate risk axis tracking exposure to "Harvest Now, Decrypt Later" threats.
-- **Fusion Engine:** The convergence layer that promotes multi-signal threats to High Priority alerts.
-- **FastAPI Backend:** Provides real-time transaction scoring in `< 100ms`.
-- **React Dashboard:** A live-updating SOC triage console displaying network structures, alert queues, and telemetry.
+The system splits into an **offline/batch** half and an **online/real-time**
+half: slow graph intelligence is precomputed periodically and cached, while
+per-transaction scoring stays fast by combining that cache with signals
+computed live.
 
-See [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) for a deeper walkthrough of each piece and ideas for what to build next.
+- **Data Generation** (`data-generator/`): Synthesizes realistic banking
+  streams (transactions, auth logs, TLS sessions) from `config.yaml`.
+- **Detection Engines** (`engines/`, offline):
+  - _Graph Engine:_ Detects structural anomalies like fan-in/fan-out and
+    community clustering; writes per-account `graph_risk_score` +
+    `graph_reason` to `data/graph/graph_features.csv`.
+  - _Cyber Engine:_ Flags account-takeover indicators like impossible
+    travel and device churn.
+  - _Quantum Engine:_ A separate risk axis tracking exposure to "Harvest
+    Now, Decrypt Later" threats.
+- **Fusion Engine:** The convergence layer that promotes multi-signal
+  threats to High Priority alerts.
+- **FastAPI Backend** (`api/`, online): `realtime_scorer.py` scores a
+  transaction in `< 100ms` by combining the cached graph score with
+  live-computed cyber/quantum signals and per-account rolling state
+  (in-process, not yet Redis-backed). `main.py` exposes it over HTTP:
+  `/score` (single transaction, includes `cluster_details` when the
+  receiving account looks like a fan-in collector), `/feed` (rolling
+  window of every scored transaction), `/alerts` (flagged only),
+  `/account/{id}`, `/stats`, `/health`.
+- **React Dashboard** (`dashboard/`): A live-updating SOC triage console —
+  two-tier transaction filter (scope × tier), a network view rendering the
+  real mule cluster from `cluster_details`, and a separate quantum-exposure
+  panel. Shipped as a self-contained `mulepredator_dashboard.html` (the one
+  the setup steps below launch) plus a bundler-friendly `.jsx` twin kept in
+  sync by hand.
+
+See [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md) for a deeper walkthrough of
+each piece and ideas for what to build next, and [`CLAUDE.md`](CLAUDE.md)
+for repo-specific gotchas (offline/online threshold duplication, the
+html/jsx sync requirement, etc).
 
 ---
 
