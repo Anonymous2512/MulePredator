@@ -1,31 +1,27 @@
-
 # MulePredator 🦅
+
 Real-Time UPI Fraud Intelligence & SOC Console
 
-MulePredator is a high-performance fraud detection pipeline and Security Operations Center (SOC) console. It identifies complex money-laundering operations (like mule networks and smurfing rings) by employing a **multi-signal convergence thesis**. 
+MulePredator is a high-performance fraud detection pipeline and Security Operations Center (SOC) console. It identifies complex money-laundering operations (like mule networks and smurfing rings) by employing a **multi-signal convergence thesis**.
 
 Rather than overwhelming analysts with single-point anomalies, MulePredator evaluates transactions across three distinct axes **Graph/Network**, **Cyber/Device**, and **Quantum Risk** and only escalates alerts when multiple independent engines agree.
 
-
 ## Run Locally
-
 
 ## Deployment
 
 To deploy this project run
 
-
-
 ## 🏗️ Project Architecture
 
-*   **Data Generation:** Synthesizes realistic banking streams (transactions, auth logs, TLS sessions).
-*   **Detection Engines:** 
-    *   *Graph Engine:* Detects structural anomalies like fan-in/fan-out and community clustering.
-    *   *Cyber Engine:* Flags account-takeover indicators like impossible travel and device churn.
-    *   *Quantum Engine:* A separate risk axis tracking exposure to "Harvest Now, Decrypt Later" threats.
-*   **Fusion Engine:** The convergence layer that promotes multi-signal threats to High Priority alerts.
-*   **FastAPI Backend:** Provides real-time transaction scoring in `< 100ms`.
-*   **React Dashboard:** A live-updating SOC triage console displaying network structures, alert queues, and telemetry.
+- **Data Generation:** Synthesizes realistic banking streams (transactions, auth logs, TLS sessions).
+- **Detection Engines:**
+  - _Graph Engine:_ Detects structural anomalies like fan-in/fan-out and community clustering.
+  - _Cyber Engine:_ Flags account-takeover indicators like impossible travel and device churn.
+  - _Quantum Engine:_ A separate risk axis tracking exposure to "Harvest Now, Decrypt Later" threats.
+- **Fusion Engine:** The convergence layer that promotes multi-signal threats to High Priority alerts.
+- **FastAPI Backend:** Provides real-time transaction scoring in `< 100ms`.
+- **React Dashboard:** A live-updating SOC triage console displaying network structures, alert queues, and telemetry.
 
 ---
 
@@ -34,14 +30,16 @@ To deploy this project run
 Follow these steps to generate the data, warm up the engines, and start the live console.
 
 ### Prerequisites
-* **Python 3.10 or 3.11**
-* **Git**
-* A modern web browser (Chrome, Edge, Firefox)
+
+- **Python 3.10 or 3.11**
+- **Git**
+- A modern web browser (Chrome, Edge, Firefox)
 
 ### Step 1: Clone & Environment Setup
+
 Open your terminal (Command Prompt/PowerShell or Mac/Linux Terminal) and run:
 
-```bash
+````bash
 # 1. Clone the repository and enter the directory
 git clone [https://github.com/Anonymous2512/MulePredator.git]
 cd MulePredator
@@ -76,8 +74,6 @@ SUCCESS
 
 ---
 
-
-
 ### Step 2: Launch the Live Demo Services
 
 To see the system run in real-time, you need to spin up the API server and the transaction simulator.
@@ -105,7 +101,7 @@ uvicorn main:app --app-dir api --port 8000
 uvicorn main:app --app-dir api --port 8000
 ```
 
-*(Leave this terminal open. The server is ready when it says `Uvicorn running on http://127.0.0.1:8000`)*
+_(Leave this terminal open. The server is ready when it says `Uvicorn running on http://127.0.0.1:8000`)_
 
 #### 📡 2B. Start the Transaction Replayer
 
@@ -117,7 +113,7 @@ python api/replay.py
 
 ```
 
-*(This script will continuously fire transactions at your live API).*
+_(This script will continuously fire transactions at your live API)._
 
 ---
 
@@ -133,12 +129,10 @@ You will now see live transactions streaming into the queue. Clean transactions 
 
 ## 🛠️ API Documentation
 
-Once the server is running (Step 4A), you can view the interactive API documentation and test endpoints manually by visiting:
+Once the server is running (Step 2A), you can view the interactive API documentation and test endpoints manually by visiting:
 **[http://127.0.0.1:8000/docs](https://www.google.com/search?q=http://127.0.0.1:8000/docs)**
-
-
-
 
 ## License
 
 This project was developed for educational and hackathon purposes.
+````
