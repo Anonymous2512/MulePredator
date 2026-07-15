@@ -1,0 +1,194 @@
+global:
+  master_seed: 42
+  sim_start: "2026-06-10 00:00:00"
+  sim_end: "2026-07-10 00:00:00"
+  timezone: "Asia/Kolkata"
+
+accounts:
+  total: 50000
+  persona_weights:
+    retail: 0.60
+    hnw: 0.10
+    micro_merchant: 0.20
+    corporate: 0.10
+  balance_lognormal:
+    retail: [10.5, 0.8]
+    hnw: [13.5, 1.0]
+    micro_merchant: [11.0, 0.7]
+    corporate: [15.0, 1.2]
+  upi_bank_weights:
+    okhdfc: 0.20
+    oksbi: 0.18
+    okicici: 0.15
+    paytm: 0.12
+    ybl: 0.12
+    okaxis: 0.08
+    kotak: 0.08
+    ibl: 0.07
+
+auth:
+  target_events: 650000
+  nhpp:
+    base_rate_lognormal:
+      retail: [1.5, 0.5]
+      hnw: [0.7, 0.4]
+      micro_merchant: [2.0, 0.5]
+      corporate: [1.0, 0.3]
+    time_of_day_weights:
+      - 0.02
+      - 0.01
+      - 0.01
+      - 0.01
+      - 0.02
+      - 0.05
+      - 0.15
+      - 0.30
+      - 0.60
+      - 1.00
+      - 1.00
+      - 0.90
+      - 0.85
+      - 0.70
+      - 0.75
+      - 0.90
+      - 0.95
+      - 0.90
+      - 0.80
+      - 0.75
+      - 0.60
+      - 0.50
+      - 0.25
+      - 0.08
+    day_of_week_weights:
+      default: [1.0, 1.0, 1.0, 1.0, 1.0, 0.7, 0.5]
+      corporate: [1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.05]
+  hawkes:
+    burst_fraction: 0.12
+    burst_delay_minutes: [2, 30]
+  # Legitimate accounts also fail logins, use new devices, and occasionally
+  # trip travel-velocity flags. Without this, those three signals become
+  # 100% fraud-exclusive (label leakage): a model "detects fraud" by reading
+  # a feature only fraud accounts ever have. These base rates inject benign
+  # occurrences so the signals stay predictive-but-noisy, like the real world.
+  legit_noise:
+    failed_login_fraction: 0.010      # ~1% of legit auth events are a benign failed attempt (typo, wrong PIN)
+    new_device_fraction: 0.020        # ~2% of legit auth events come from a newly-seen device (new phone, reinstall)
+    travel_flag_fraction: 0.0015      # ~0.15% of legit auth events look like fast travel (VPN, mobile IP GeoIP error)
+
+transactions:
+  target_count: 2000000
+  amount_lognormal:
+    retail: [8.5, 1.0]
+    hnw: [11.5, 1.2]
+    micro_merchant: [9.0, 0.9]
+    corporate: [13.0, 1.5]
+  amount_bounds_inr:
+    retail: [50, 25000]
+    hnw: [10000, 1000000]
+    micro_merchant: [100, 50000]
+    corporate: [50000, 50000000]
+  round_number_gravity_prob: 0.35
+  round_number_buckets: [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
+  cross_persona_edge_prob: 0.08
+  session_duration_mean_minutes: 20
+
+crypto:
+  profile_weights:
+    modern_pqc: 0.65
+    modern_non_pqc: 0.15
+    legacy_migrated: 0.10
+    legacy_static_rsa: 0.08
+    very_legacy: 0.02
+  data_volume_lognormal:
+    retail: [1.5, 1.2]
+    hnw: [4.0, 1.5]
+    micro_merchant: [2.0, 1.2]
+    corporate: [5.0, 1.8]
+
+fraud:
+  total_fraud_accounts: 1200
+  compound_fraud_fraction: 0.15
+  co_occurrence_matrix:
+    sleeper_mule: {sleeper_mule: 1.0, smurfing: 0.15, device_farm: 0.10, ato: 0.25, hndl: 0.05}
+    smurfing: {sleeper_mule: 0.15, smurfing: 1.0, device_farm: 0.20, ato: 0.10, hndl: 0.02}
+    device_farm: {sleeper_mule: 0.10, smurfing: 0.20, device_farm: 1.0, ato: 0.15, hndl: 0.01}
+    ato: {sleeper_mule: 0.25, smurfing: 0.10, device_farm: 0.15, ato: 1.0, hndl: 0.03}
+    hndl: {sleeper_mule: 0.05, smurfing: 0.02, device_farm: 0.01, ato: 0.03, hndl: 1.0}
+  sleeper_mule:
+    n_rings: 15
+    accounts_per_ring: [10, 12]
+    compromise_day_range: [5, 25]
+    burst_duration_hours: 6
+    burst_txn_count: [40, 80]
+    burst_amount_lognormal: [10.5, 0.5]
+  smurfing:
+    n_networks: 10
+    n_smurfs_per_network: [15, 25]
+    amount_range_inr: [8000, 49000]
+    window_minutes: [20, 45]
+    max_transfers_per_smurf: 3
+  device_farm:
+    n_clusters: 20
+    accounts_per_cluster: 8
+    cycle_length: 8
+    n_cycle_repeats: [3, 5]
+    hop_amount_lognormal: [9.5, 0.3]
+    inter_hop_mean_minutes: 4.0
+  ato:
+    n_accounts: 250
+    failed_auth_count: 4
+    cash_out_txn_count: [3, 8]
+    cash_out_amount_lognormal: [11.0, 0.5]
+    ato_to_ring_linkage_prob: 0.25
+  hndl:
+    n_accounts: 100
+    target_personas: [hnw, corporate]
+    key_sizes: [1024, 2048]
+  hard_negatives:
+    target_accounts: 160
+    family_tablet:
+      n_groups: 20
+      accounts_per_group: 3
+    festive_merchant:
+      n_merchants: 10
+      volume_multiplier: 15.0
+      festival_day_range: [12, 16]
+
+drift:
+  amount_drift_slope_normal: [0.0, 0.08]
+  amount_drift_clip: [-0.15, 0.20]
+  smurfing_window_late_minutes: 45
+  device_farm_late_interval_minutes: 7.0
+
+degradation:
+  timestamp_jitter_fraction: 0.03
+  timestamp_jitter_std_seconds: 30.0
+  null_fraction_auth_fields: 0.015
+  null_fraction_crypto_fields: 0.008
+  duplicate_txn_fraction: 0.005
+  duplicate_timestamp_delay_seconds: [1, 5]
+  geoip_noise_fraction: 0.05
+  geoip_noise_std_degrees: 1.5
+
+validation:
+  # Ranges below were re-measured after fixing ground-truth reconciliation
+  # (see generate.py: promote_to_fraud / reconcile_ground_truth). Labels are
+  # now tied strictly to accounts that actually received injected fraud
+  # behavior, which lowered prevalence from the original ~2.4% (many labels
+  # had no real signal behind them) to ~1.8%. To raise fraud volume back up
+  # instead of accepting this range, increase the injection caps in the
+  # fraud.* typology blocks below (n_rings, n_networks, n_clusters,
+  # ato.n_accounts) rather than total_fraud_accounts, since it's the caps
+  # that now determine how many accounts actually get behavior.
+  fraud_txn_prevalence_range: [0.016, 0.024]
+  fraud_account_prevalence_range: [0.015, 0.022]
+  impossible_travel_speed_kmph: 900.0
+
+split:
+  train_days: [1, 20]
+  val_days: [21, 25]
+  holdout_days: [26, 30]
+
+output:
+  dir: "data/final"
+  raw_dir: "data/raw"

@@ -1,0 +1,51 @@
+Synthetic Fraud Dataset Run Summary
+Master seed: 42
+Accounts: 50,000
+Persona counts:
+  corporate: 5,067
+  hnw: 4,942
+  micro_merchant: 10,160
+  retail: 29,831
+Transactions: 2,017,255
+Auth events: 657,237
+Crypto sessions: 2,017,255
+Fraud accounts: 909 (1.82%)
+Fraud type breakdown:
+  ato: 264
+  smurfing: 214
+  hndl: 166
+  device_farm: 160
+  sleeper_mule: 159
+Compound fraud accounts: 54
+Hard negatives: 70
+HNDL-risk sessions: 206,280
+Injected fraud rows:
+  sleeper_txns: 904
+  smurf_txns: 204
+  device_farm_txns: 552
+  ato_txns: 1,232
+  failed_ato_auths: 1,000
+  family_tablet_txns: 127
+  festive_merchant_txns: 4,200
+  reconciled_dropped_device_farm: 73
+  reconciled_dropped_ato: 141
+  reconciled_dropped_smurfing: 283
+  reconciled_dropped_sleeper_mule: 124
+Degradation layer:
+  auth_timestamp_jitter_rows: 19,717
+  auth_null_rows_per_field: 9,858
+  auth_geoip_noise_rows: 32,861
+  duplicate_transaction_rows: 10,036
+  crypto_data_volume_null_rows: 16,138
+Validation:
+  PASS referential_integrity
+  PASS temporal_and_balance_bounds
+  PASS fraud_txn_prevalence=2.0189%
+  PASS fraud_account_prevalence=1.8180%
+  PASS hndl_correctness soft_non_pqc_tls13_rows=301735
+  PASS velocity_check
+Temporal split:
+  train: 1,250,401 transactions, sender-fraud 1.60%
+  val: 375,192 transactions, sender-fraud 1.68%
+  holdout: 391,662 transactions, sender-fraud 1.59%
+Generation time seconds: 99.46
