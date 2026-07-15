@@ -84,54 +84,29 @@
           hndl_risk: false,
           new_device: false,
           cluster: null,
+          cluster_details: null,
           ...o,
         };
       }
 
-      const CLUSTERS = {
-        ring_a: {
-          id: "ring_a",
-          label: "smurfing star · net_004",
-          nodes: [
-            {
-              id: "collector",
-              label: "00003af1",
-              role: "collector",
-              risk: 1.0,
-            },
-            ...Array.from({ length: 11 }, (_, i) => ({
-              id: `sa${i}`,
-              label: `sender_${i}`,
-              role: "spoke",
-              risk: 0.28 + Math.random() * 0.2,
-            })),
-            { id: "cashout", label: "0000e2d1", role: "cashout", risk: 0.9 },
-          ],
-          edges: [
-            ...Array.from({ length: 11 }, (_, i) => ({
-              from: `sa${i}`,
-              to: "collector",
-              amt: 8000 + rnd(0, 40000),
-            })),
-            { from: "collector", to: "cashout", amt: 420000 },
-          ],
-        },
-        ring_b: {
-          id: "ring_b",
-          label: "device-farm cycle · cluster_07",
-          nodes: Array.from({ length: 8 }, (_, i) => ({
-            id: `db${i}`,
-            label: `acct_${i}`,
-            role: i === 0 ? "collector" : "spoke",
-            risk: 0.5 + Math.random() * 0.4,
+      // Demo-mode stand-in for a real /score `cluster_details` payload -- same
+      // shape the API returns, just fabricated so offline demo mode has
+      // something to render through the one real NetworkView code path.
+      function mkClusterDetails(collectorLabel, n) {
+        return {
+          collector_account_id: collectorLabel,
+          collector_graph_risk_score: 0.8 + Math.random() * 0.2,
+          sender_account_ids: Array.from(
+            { length: n },
+            (_, i) => `sender_${i}`,
+          ),
+          spokes: Array.from({ length: n }, (_, i) => ({
+            account_id: `sender_${i}`,
+            amount_inr: 8000 + rnd(0, 40000),
+            timestamp: new Date().toISOString(),
           })),
-          edges: Array.from({ length: 8 }, (_, i) => ({
-            from: `db${i}`,
-            to: `db${(i + 1) % 8}`,
-            amt: 12000 + rnd(0, 8000),
-          })),
-        },
-      };
+        };
+      }
 
       const MOCK_TXNS = [
         mkTxn({
@@ -150,7 +125,7 @@
           reason:
             "CONVERGED (2 independent signals) - cyber: failed login burst; new device; device/IP churn; graph: extreme fan-in (possible collector/hub)",
           ts: "14:19:51",
-          cluster: "ring_a",
+          cluster_details: mkClusterDetails("00003af1", 11),
         }),
         mkTxn({
           txn_id: "5d9f1120-0000-40",
@@ -170,7 +145,7 @@
           reason:
             "CONVERGED (2 independent signals) - cyber: device/IP churn; graph: small tightly-clustered community of 31 accounts | SEPARATE quantum exposure: TLSv1.0, 1024-bit key, no forward secrecy, 512.0MB transferred",
           ts: "14:15:33",
-          cluster: "ring_b",
+          cluster_details: mkClusterDetails("00005473", 8),
         }),
         mkTxn({
           txn_id: "fc446787-0000-40",
@@ -185,7 +160,7 @@
           reason:
             "CONVERGED (2 independent signals) - cyber: elevated cyber score (0.40); graph: small tightly-clustered community of 42 accounts",
           ts: "14:22:07",
-          cluster: "ring_b",
+          cluster_details: mkClusterDetails("0000150c", 6),
         }),
         mkTxn({
           txn_id: "3e7a8890-0000-40",
@@ -200,7 +175,7 @@
           reason:
             "CONVERGED (2 independent signals) - cyber: elevated cyber score (0.40); graph: high betweenness (pivot account within its cluster)",
           ts: "14:11:02",
-          cluster: "ring_a",
+          cluster_details: mkClusterDetails("000088f8", 5),
         }),
         mkTxn({
           txn_id: "9f2b4451-0000-40",
@@ -229,7 +204,7 @@
           reason:
             "single signal only - graph: small tightly-clustered community of 38 accounts",
           ts: "14:05:19",
-          cluster: "ring_b",
+          cluster_details: mkClusterDetails("0000926f", 4),
         }),
         mkTxn({
           txn_id: "b12e9964-0000-40",
@@ -406,31 +381,26 @@
         );
       }
 
-      function NetworkView({ ring }) {
+      function NetworkView({ details }) {
         const w = 440,
           h = 320,
           cx = w / 2,
           cy = h / 2;
+        const spokeIds = details ? details.sender_account_ids : [];
         const pos = useMemo(() => {
-          if (!ring) return {};
-          const p = {};
-          const spokes = ring.nodes.filter((x) => x.role === "spoke");
-          ring.nodes.forEach((n) => {
-            if (n.role === "collector") p[n.id] = { x: cx, y: cy };
-            else if (n.role === "cashout") p[n.id] = { x: cx, y: cy - 120 };
-            else {
-              const idx = spokes.indexOf(n);
-              const ang = (idx / Math.max(spokes.length, 1)) * Math.PI * 2;
-              p[n.id] = {
-                x: cx + Math.cos(ang) * 135,
-                y: cy + Math.sin(ang) * 105,
-              };
-            }
+          if (!details) return {};
+          const p = { collector: { x: cx, y: cy } };
+          spokeIds.forEach((id, idx) => {
+            const ang = (idx / Math.max(spokeIds.length, 1)) * Math.PI * 2;
+            p[id] = {
+              x: cx + Math.cos(ang) * 135,
+              y: cy + Math.sin(ang) * 105,
+            };
           });
           return p;
-        }, [ring]);
+        }, [details]);
 
-        if (!ring) {
+        if (!details) {
           return (
             <div
               style={{
@@ -459,7 +429,7 @@
               >
                 ◯
               </div>
-              No active mule ring
+              No active mule cluster
               <span
                 style={{
                   fontSize: 10,
@@ -469,31 +439,26 @@
                   lineHeight: 1.5,
                 }}
               >
-                Select a transaction that belongs to a detected cluster to
-                render its network.
+                Select a transaction whose receiving account shows fan-in
+                risk to render its real senders and collector.
               </span>
             </div>
           );
         }
-        const color = (role, risk) =>
-          role === "collector"
-            ? C.high
-            : role === "cashout"
-              ? C.monitor
-              : `rgba(139,127,224,${0.4 + risk * 0.6})`;
         return (
           <svg
             viewBox={`0 0 ${w} ${h}`}
             style={{ width: "100%", height: "auto" }}
           >
-            {ring.edges.map((e, i) => {
-              const a = pos[e.from],
-                b = pos[e.to];
+            {spokeIds.map((id) => {
+              const a = pos[id],
+                b = pos.collector;
               if (!a || !b) return null;
-              const big = e.amt > 100000;
+              const spoke = details.spokes.find((s) => s.account_id === id);
+              const big = spoke && spoke.amount_inr > 100000;
               return (
                 <line
-                  key={i}
+                  key={id}
                   x1={a.x}
                   y1={a.y}
                   x2={b.x}
@@ -504,34 +469,37 @@
                 />
               );
             })}
-            {ring.nodes.map((n) => {
-              const p = pos[n.id];
+            <circle
+              cx={pos.collector.x}
+              cy={pos.collector.y}
+              r={16}
+              fill={C.high}
+              stroke={C.bg}
+              strokeWidth={2}
+            />
+            <text
+              x={pos.collector.x}
+              y={pos.collector.y + 16 + 12}
+              textAnchor="middle"
+              fontSize={9}
+              fill={C.textDim}
+              fontFamily="'JetBrains Mono',monospace"
+            >
+              {details.collector_account_id}
+            </text>
+            {spokeIds.map((id) => {
+              const p = pos[id];
               if (!p) return null;
-              const r =
-                n.role === "collector" ? 16 : n.role === "cashout" ? 13 : 8;
               return (
-                <g key={n.id}>
-                  <circle
-                    cx={p.x}
-                    cy={p.y}
-                    r={r}
-                    fill={color(n.role, n.risk)}
-                    stroke={C.bg}
-                    strokeWidth={2}
-                  />
-                  {(n.role === "collector" || n.role === "cashout") && (
-                    <text
-                      x={p.x}
-                      y={p.y + r + 12}
-                      textAnchor="middle"
-                      fontSize={9}
-                      fill={C.textDim}
-                      fontFamily="'JetBrains Mono',monospace"
-                    >
-                      {n.label}
-                    </text>
-                  )}
-                </g>
+                <circle
+                  key={id}
+                  cx={p.x}
+                  cy={p.y}
+                  r={8}
+                  fill={`rgba(139,127,224,0.75)`}
+                  stroke={C.bg}
+                  strokeWidth={2}
+                />
               );
             })}
           </svg>
@@ -642,7 +610,7 @@
         const [txns, setTxns] = useState(MOCK_TXNS);
         const [selected, setSelected] = useState(MOCK_TXNS[0]);
         const [tierFilter, setTierFilter] = useState("all");
-        const [scopeFilter, setScopeFilter] = useState("flagged");
+        const [scopeFilter, setScopeFilter] = useState("all");
         const [live, setLive] = useState(false);
         const [demoMode, setDemoMode] = useState(false);
         const liveRef = useRef(null);
@@ -658,10 +626,10 @@
             if (USE_LIVE_API) {
               try {
                 // LIVE SEAM
-                const r = await fetch(`${API_BASE}/alerts?limit=30`);
+                const r = await fetch(`${API_BASE}/feed?limit=100`);
                 const j = await r.json();
-                if (j.alerts && j.alerts.length)
-                  setTxns((prev) => mergeApi(j.alerts, prev));
+                if (j.feed && j.feed.length)
+                  setTxns((prev) => mergeApi(j.feed, prev));
               } catch (e) {
                 /* API unreachable; keep current data */
               }
@@ -706,10 +674,11 @@
               reason:
                 "CONVERGED (2 independent signals) - cyber: failed login burst; device/IP churn; graph: extreme fan-in (possible collector/hub)",
               ts: nowStamp(),
-              cluster: hasRing
-                ? Math.random() > 0.5
-                  ? "ring_a"
-                  : "ring_b"
+              cluster_details: hasRing
+                ? mkClusterDetails(
+                    Math.random().toString(16).slice(2, 10),
+                    rnd(3, 12),
+                  )
                 : null,
               simulated: true,
             });
@@ -720,11 +689,9 @@
 
         const visible = useMemo(() => {
           let list = txns;
-          if (scopeFilter === "flagged")
-            list = list.filter((t) => t.tier !== "none");
-          else if (scopeFilter === "suspicious")
-            list = list.filter((t) => t.signals >= 1);
-          else if (scopeFilter === "alerts")
+          if (scopeFilter === "suspicious")
+            list = list.filter((t) => t.signals === 1);
+          else if (scopeFilter === "flagged")
             list = list.filter((t) => t.signals >= 2);
           if (tierFilter !== "all")
             list = list.filter((t) => t.tier === tierFilter);
@@ -749,8 +716,7 @@
           [txns],
         );
 
-        const ring =
-          selected && selected.cluster ? CLUSTERS[selected.cluster] : null;
+        const clusterDetails = selected ? selected.cluster_details : null;
 
         return (
           <div
@@ -904,20 +870,19 @@
                     }}
                   >
                     {[
-                      ["all", "ALL TXNS"],
-                      ["flagged", "FLAGGED"],
+                      ["all", "ALL"],
                       ["suspicious", "SUSPICIOUS"],
-                      ["alerts", "ALERTS"],
+                      ["flagged", "FLAGGED"],
                     ].map(([k, lbl]) => (
                       <button
                         key={k}
                         onClick={() => setScopeFilter(k)}
                         title={
                           k === "suspicious"
-                            ? "flagged by at least 1 engine"
-                            : k === "alerts"
+                            ? "flagged by exactly 1 engine"
+                            : k === "flagged"
                               ? "converged: 2+ engines agree"
-                              : ""
+                              : "every transaction, including clean"
                         }
                         style={{
                           padding: "5px 9px",
@@ -1313,10 +1278,12 @@
                         fontFamily: "'JetBrains Mono',monospace",
                       }}
                     >
-                      {ring ? ring.label : "no cluster selected"}
+                      {clusterDetails
+                        ? `fan-in · ${clusterDetails.sender_account_ids.length} senders`
+                        : "no cluster selected"}
                     </span>
                   </div>
-                  {ring && (
+                  {clusterDetails && (
                     <div
                       style={{
                         fontSize: 11,
@@ -1324,37 +1291,72 @@
                         marginBottom: 8,
                       }}
                     >
-                      Rendering the cluster this transaction belongs to. The
-                      collector is the actionable node.
+                      Real senders currently in this collector's trailing
+                      window. The collector is the actionable node.
                     </div>
                   )}
-                  <NetworkView ring={ring} />
-                  {ring && (
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 16,
-                        justifyContent: "center",
-                        marginTop: 8,
-                        fontSize: 10,
-                        fontFamily: "'JetBrains Mono',monospace",
-                        color: C.textDim,
-                      }}
-                    >
-                      <span>
-                        <span style={{ color: C.high }}>●</span> collector
-                      </span>
-                      <span>
-                        <span style={{ color: C.monitor }}>●</span> cash-out
-                      </span>
-                      <span>
-                        <span style={{ color: C.graph }}>●</span> mule node
-                      </span>
-                      <span>
-                        <span style={{ color: C.monitor }}>-</span> large
-                        transfer
-                      </span>
-                    </div>
+                  <NetworkView details={clusterDetails} />
+                  {clusterDetails && (
+                    <>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 16,
+                          justifyContent: "center",
+                          marginTop: 8,
+                          fontSize: 10,
+                          fontFamily: "'JetBrains Mono',monospace",
+                          color: C.textDim,
+                        }}
+                      >
+                        <span>
+                          <span style={{ color: C.high }}>●</span> collector
+                        </span>
+                        <span>
+                          <span style={{ color: C.graph }}>●</span> sender
+                        </span>
+                        <span>
+                          <span style={{ color: C.monitor }}>-</span> large
+                          transfer
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 10,
+                          maxHeight: 160,
+                          overflowY: "auto",
+                          border: `1px solid ${C.line}`,
+                          borderRadius: 6,
+                        }}
+                      >
+                        {clusterDetails.spokes.map((s, i) => (
+                          <div
+                            key={s.account_id + i}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              padding: "6px 10px",
+                              borderBottom:
+                                i < clusterDetails.spokes.length - 1
+                                  ? `1px solid ${C.line}`
+                                  : "none",
+                              fontFamily: "'JetBrains Mono',monospace",
+                              fontSize: 10,
+                            }}
+                          >
+                            <span style={{ color: C.text }}>
+                              {s.account_id}
+                            </span>
+                            <span style={{ color: C.textDim }}>
+                              → {clusterDetails.collector_account_id}
+                            </span>
+                            <span style={{ color: C.textDim }}>
+                              ₹{Math.round(s.amount_inr).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
@@ -1547,10 +1549,10 @@
         );
       }
 
-      // LIVE SEAM: merge API /alerts items into the txn stream, de-duping by id
-      function mergeApi(apiAlerts, prev) {
+      // LIVE SEAM: merge API /feed items into the txn stream, de-duping by id
+      function mergeApi(apiTxns, prev) {
         const seen = new Set(prev.map((p) => p.txn_id));
-        const mapped = apiAlerts
+        const mapped = apiTxns
           .filter((a) => !seen.has(String(a.txn_id)))
           .map((a) =>
             mkTxn({
@@ -1567,6 +1569,7 @@
               amount: Math.round(a.amount_inr || 0),
               hndl_risk: (a.quantum_exposure_score ?? 0) >= 0.6,
               reason: a.reason || "",
+              cluster_details: a.cluster_details || null,
               ts: nowStamp(),
             }),
           );
