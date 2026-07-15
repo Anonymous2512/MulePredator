@@ -76,23 +76,27 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-### Step 2: Run the Offline (Batch) Pipeline
+### Step 2: Initialize the Pipeline
 
-This produces the synthetic dataset and the cached graph intelligence the
-real-time scorer depends on:
+This single command:
+
+- installs dependencies
+- generates synthetic banking data
+- creates graph features
+- builds ML feature tables
+- initializes all detection engines
 
 ```bash
-python3 data-generator/generate.py --config config.yaml
-python3 data-generator/build_feature_table.py --input-dir data/final --output-dir data/features --config config.yaml
-python3 engines/graph_engine.py   --features data/features/features.csv --output-dir data/graph
-python3 engines/cyber_engine.py   --features data/features/features.csv --output-dir data/cyber
-python3 engines/quantum_engine.py --features data/features/features.csv --output-dir data/quantum
-python3 engines/fusion_engine.py  --graph data/graph/graph_features.csv --cyber data/cyber/cyber_features.csv \
-    --quantum data/quantum/quantum_features.csv --features data/features/features.csv --output-dir data/fusion
+python setup_pipeline.py
 ```
 
-`data/graph/graph_features.csv` must exist before the API will start (see
-`api/README.md` for the full offline/online architecture split).
+Wait until the script prints:
+
+```
+SUCCESS
+```
+
+---
 
 ### Step 3: Launch the Live Demo Services
 
@@ -138,14 +142,14 @@ cluster (collector + senders) rendered in the Network panel.
 Once the server is running (Step 3A), view the interactive API docs at
 **http://127.0.0.1:8000/docs**.
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/score` | Score a single transaction; returns decision, tier, per-engine scores, `cluster_details`, reason, latency |
-| GET | `/feed?limit=100` | Rolling window of the last 100 scored transactions (clean + flagged), newest first — what the dashboard polls |
-| GET | `/alerts?limit=50&tier=high_priority` | Recent *flagged* alerts only |
-| GET | `/account/{account_id}` | Cached graph intelligence + live rolling state for one account |
-| GET | `/stats` | Running counters: scored, alerts, avg latency |
-| GET | `/health` | Liveness check |
+| Method | Path                                  | Purpose                                                                                                       |
+| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| POST   | `/score`                              | Score a single transaction; returns decision, tier, per-engine scores, `cluster_details`, reason, latency     |
+| GET    | `/feed?limit=100`                     | Rolling window of the last 100 scored transactions (clean + flagged), newest first — what the dashboard polls |
+| GET    | `/alerts?limit=50&tier=high_priority` | Recent _flagged_ alerts only                                                                                  |
+| GET    | `/account/{account_id}`               | Cached graph intelligence + live rolling state for one account                                                |
+| GET    | `/stats`                              | Running counters: scored, alerts, avg latency                                                                 |
+| GET    | `/health`                             | Liveness check                                                                                                |
 
 `cluster_details` is populated on a transaction whenever its **receiving**
 account looks like a fan-in collector (graph engine flagged it, and it has
