@@ -3,18 +3,14 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 // ============================================================================
 // MulePredator — SOC analyst fraud-investigation console
 //
-// Design intent: an instrument-grade operations console, not a marketing
-// dashboard. Restraint is the aesthetic risk: calm dense slate surface, signal
-// colors that carry meaning (amber=monitor, red=high-priority, cyan=quantum as
-// a SEPARATE axis, green=clear), monospace for all telemetry so numeric columns
-// align like a real trading/SOC terminal. Signature element: the three-lane
-// convergence meter that shows WHICH engines fired and whether they agreed --
-// the product's core thesis ("alert on convergence, not single signals")
-// rendered directly in the UI.
+// Kept in sync with dashboard/mulepredator_dashboard.html (the standalone
+// build actually launched per the README). This module is the same UI
+// wrapped for a bundler-based app instead of a <script type="text/babel">
+// tag; if you change one, change the other.
 //
-// Runs standalone on mock data derived from the real pipeline output. To wire
-// to the live API, set USE_LIVE_API = true and point API_BASE at the FastAPI
-// service; the fetch seams are marked below.
+// Runs standalone on mock data. To wire to the live API, set
+// USE_LIVE_API = true and point API_BASE at the FastAPI service; the fetch
+// seams are marked "LIVE SEAM".
 // ============================================================================
 
 const USE_LIVE_API = true;
@@ -37,56 +33,239 @@ const C = {
   graph: "#8B7FE0",
   cyber: "#E8894A",
 };
-
 const TIER_META = {
   high_priority: { label: "HIGH PRIORITY", color: C.high, order: 0 },
   investigate: { label: "INVESTIGATE", color: C.investigate, order: 1 },
   monitor: { label: "MONITOR", color: C.monitor, order: 2 },
+  none: { label: "CLEAR", color: C.clear, order: 3 },
 };
 
-// ---- mock data derived from actual pipeline output shapes ----
-const MOCK_ALERTS = [
-  { txn_id: "fc446787-0000-40", account: "0000150c", tier: "high_priority", fraud_score: 0.83, graph: 0.83, cyber: 0.4, quantum: 0.0, signals: 2, amount: 1673, reason: "CONVERGED (2 independent signals) — cyber: elevated cyber score (0.40); graph: small tightly-clustered community of 42 accounts", ts: "07-01 14:22:07" },
-  { txn_id: "a81c0043-0000-40", account: "00003af1", tier: "high_priority", fraud_score: 1.0, graph: 1.0, cyber: 1.0, quantum: 0.0, signals: 2, amount: 48200, reason: "CONVERGED (2 independent signals) — cyber: failed login burst; new device; device/IP churn; graph: extreme fan-in (possible collector/hub)", ts: "07-01 14:19:51" },
-  { txn_id: "5d9f1120-0000-40", account: "00005473", tier: "high_priority", fraud_score: 0.92, graph: 0.92, cyber: 0.6, quantum: 0.85, signals: 2, amount: 92000, reason: "CONVERGED (2 independent signals) — cyber: device/IP churn; graph: small tightly-clustered community of 31 accounts | SEPARATE quantum exposure: TLSv1.0, 1024-bit key, no forward secrecy, 512.0MB transferred", ts: "07-01 14:15:33" },
-  { txn_id: "3e7a8890-0000-40", account: "000088f8", tier: "investigate", fraud_score: 0.65, graph: 0.65, cyber: 0.4, quantum: 0.0, signals: 2, amount: 8400, reason: "CONVERGED (2 independent signals) — cyber: elevated cyber score (0.40); graph: high betweenness (pivot account within its cluster)", ts: "07-01 14:11:02" },
-  { txn_id: "9f2b4451-0000-40", account: "00004472", tier: "investigate", fraud_score: 0.58, graph: 0.58, cyber: 0.35, quantum: 0.0, signals: 2, amount: 15600, reason: "CONVERGED (2 independent signals) — cyber: elevated cyber score (0.35); graph: small tightly-clustered community of 58 accounts", ts: "07-01 14:08:44" },
-  { txn_id: "c04d7783-0000-40", account: "0000926f", tier: "monitor", fraud_score: 0.79, graph: 0.79, cyber: 0.15, quantum: 0.0, signals: 1, amount: 3200, reason: "single signal only — graph: small tightly-clustered community of 38 accounts", ts: "07-01 14:05:19" },
-  { txn_id: "b12e9964-0000-40", account: "00002ff0", tier: "monitor", fraud_score: 0.6, graph: 0.0, cyber: 0.6, quantum: 0.0, signals: 1, amount: 21000, reason: "single signal only — cyber: new device; impossible travel velocity", ts: "07-01 14:02:55" },
-  { txn_id: "77a3c105-0000-40", account: "00001a2b", tier: "monitor", fraud_score: 0.55, graph: 0.55, cyber: 0.2, quantum: 0.7, signals: 1, amount: 67000, reason: "single signal only — graph: extreme fan-in (possible collector/hub) | SEPARATE quantum exposure: TLSv1.2, 2048-bit key, no forward secrecy, 340.0MB transferred", ts: "07-01 13:58:41" },
-];
+function rnd(a, b) {
+  return Math.floor(Math.random() * (b - a + 1)) + a;
+}
+function nowStamp() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+function mkTxn(o) {
+  return {
+    ip: "49." + rnd(0, 255) + "." + rnd(0, 255) + "." + rnd(1, 254),
+    device: "dev-" + Math.random().toString(16).slice(2, 10),
+    tls: "TLSv1.3",
+    key: null,
+    fs: true,
+    vol: +(Math.random() * 40).toFixed(1),
+    hndl_risk: false,
+    new_device: false,
+    cluster_details: null,
+    ...o,
+  };
+}
 
-// a real ring: collector + spokes (smurfing-style star) for the network view
-const MOCK_RING = {
-  nodes: [
-    { id: "collector", label: "00003af1", role: "collector", risk: 1.0 },
-    ...Array.from({ length: 11 }, (_, i) => ({ id: `s${i}`, label: `spoke_${i}`, role: "spoke", risk: 0.3 + Math.random() * 0.2 })),
-    { id: "cashout", label: "0000e2d1", role: "cashout", risk: 0.9 },
-  ],
-  edges: [
-    ...Array.from({ length: 11 }, (_, i) => ({ from: `s${i}`, to: "collector", amt: 8000 + Math.floor(Math.random() * 40000) })),
-    { from: "collector", to: "cashout", amt: 420000 },
-  ],
-};
+// Demo-mode stand-in for a real /score `cluster_details` payload — same
+// shape the API returns, just fabricated so offline demo mode has
+// something to render through the one real NetworkView code path.
+function mkClusterDetails(collectorLabel, n) {
+  return {
+    collector_account_id: collectorLabel,
+    collector_graph_risk_score: 0.8 + Math.random() * 0.2,
+    sender_account_ids: Array.from({ length: n }, (_, i) => `sender_${i}`),
+    spokes: Array.from({ length: n }, (_, i) => ({
+      account_id: `sender_${i}`,
+      amount_inr: 8000 + rnd(0, 40000),
+      timestamp: new Date().toISOString(),
+    })),
+  };
+}
 
-const MOCK_QUANTUM = [
-  { account: "00005473", tls: "TLSv1.0", key: 1024, fs: false, vol: 512, score: 0.85 },
-  { account: "0000926f", tls: "TLSv1.0", key: 1024, fs: false, vol: 388, score: 0.82 },
-  { account: "00001a2b", tls: "TLSv1.2", key: 2048, fs: false, vol: 340, score: 0.7 },
-  { account: "00007c40", tls: "TLSv1.2", key: 2048, fs: false, vol: 210, score: 0.63 },
+const MOCK_TXNS = [
+  mkTxn({
+    txn_id: "a81c0043-0000-40",
+    account: "00003af1",
+    tier: "high_priority",
+    fraud_score: 1.0,
+    graph: 1.0,
+    cyber: 1.0,
+    quantum: 0.0,
+    signals: 2,
+    amount: 48200,
+    new_device: true,
+    device: "dev-9f2a10bc",
+    ip: "100.71.55.9",
+    reason:
+      "CONVERGED (2 independent signals) — cyber: failed login burst; new device; device/IP churn; graph: extreme fan-in (possible collector/hub)",
+    ts: "14:19:51",
+    cluster_details: mkClusterDetails("00003af1", 11),
+  }),
+  mkTxn({
+    txn_id: "5d9f1120-0000-40",
+    account: "00005473",
+    tier: "high_priority",
+    fraud_score: 0.92,
+    graph: 0.92,
+    cyber: 0.6,
+    quantum: 0.85,
+    signals: 2,
+    amount: 92000,
+    tls: "TLSv1.0",
+    key: 1024,
+    fs: false,
+    vol: 512,
+    hndl_risk: true,
+    reason:
+      "CONVERGED (2 independent signals) — cyber: device/IP churn; graph: small tightly-clustered community of 31 accounts | SEPARATE quantum exposure: TLSv1.0, 1024-bit key, no forward secrecy, 512.0MB transferred",
+    ts: "14:15:33",
+    cluster_details: mkClusterDetails("00005473", 8),
+  }),
+  mkTxn({
+    txn_id: "fc446787-0000-40",
+    account: "0000150c",
+    tier: "high_priority",
+    fraud_score: 0.83,
+    graph: 0.83,
+    cyber: 0.4,
+    quantum: 0.0,
+    signals: 2,
+    amount: 1673,
+    reason:
+      "CONVERGED (2 independent signals) — cyber: elevated cyber score (0.40); graph: small tightly-clustered community of 42 accounts",
+    ts: "14:22:07",
+    cluster_details: mkClusterDetails("0000150c", 6),
+  }),
+  mkTxn({
+    txn_id: "3e7a8890-0000-40",
+    account: "000088f8",
+    tier: "investigate",
+    fraud_score: 0.65,
+    graph: 0.65,
+    cyber: 0.4,
+    quantum: 0.0,
+    signals: 2,
+    amount: 8400,
+    reason:
+      "CONVERGED (2 independent signals) — cyber: elevated cyber score (0.40); graph: high betweenness (pivot account within its cluster)",
+    ts: "14:11:02",
+    cluster_details: mkClusterDetails("000088f8", 5),
+  }),
+  mkTxn({
+    txn_id: "9f2b4451-0000-40",
+    account: "00004472",
+    tier: "investigate",
+    fraud_score: 0.58,
+    graph: 0.58,
+    cyber: 0.35,
+    quantum: 0.0,
+    signals: 2,
+    amount: 15600,
+    reason:
+      "CONVERGED (2 independent signals) — cyber: elevated cyber score (0.35); graph: small tightly-clustered community of 58 accounts",
+    ts: "14:08:44",
+  }),
+  mkTxn({
+    txn_id: "c04d7783-0000-40",
+    account: "0000926f",
+    tier: "monitor",
+    fraud_score: 0.79,
+    graph: 0.79,
+    cyber: 0.15,
+    quantum: 0.0,
+    signals: 1,
+    amount: 3200,
+    reason:
+      "single signal only — graph: small tightly-clustered community of 38 accounts",
+    ts: "14:05:19",
+    cluster_details: mkClusterDetails("0000926f", 4),
+  }),
+  mkTxn({
+    txn_id: "b12e9964-0000-40",
+    account: "00002ff0",
+    tier: "monitor",
+    fraud_score: 0.6,
+    graph: 0.0,
+    cyber: 0.6,
+    quantum: 0.0,
+    signals: 1,
+    amount: 21000,
+    new_device: true,
+    reason: "single signal only — cyber: new device; impossible travel velocity",
+    ts: "14:02:55",
+  }),
+  mkTxn({
+    txn_id: "77a3c105-0000-40",
+    account: "00001a2b",
+    tier: "monitor",
+    fraud_score: 0.55,
+    graph: 0.55,
+    cyber: 0.2,
+    quantum: 0.7,
+    signals: 1,
+    amount: 67000,
+    tls: "TLSv1.2",
+    key: 2048,
+    fs: false,
+    vol: 340,
+    hndl_risk: true,
+    reason:
+      "single signal only — graph: extreme fan-in (possible collector/hub) | SEPARATE quantum exposure: TLSv1.2, 2048-bit key, no forward secrecy, 340.0MB transferred",
+    ts: "13:58:41",
+  }),
+  mkTxn({
+    txn_id: "11aa2200-0000-40",
+    account: "00006b31",
+    tier: "none",
+    fraud_score: 0.08,
+    graph: 0.02,
+    cyber: 0.05,
+    quantum: 0.0,
+    signals: 0,
+    amount: 640,
+    reason: "no fraud signals converged",
+    ts: "14:20:10",
+  }),
+  mkTxn({
+    txn_id: "22bb3311-0000-40",
+    account: "00007c40",
+    tier: "none",
+    fraud_score: 0.12,
+    graph: 0.1,
+    cyber: 0.0,
+    quantum: 0.63,
+    signals: 0,
+    amount: 210,
+    tls: "TLSv1.2",
+    key: 2048,
+    fs: false,
+    vol: 210,
+    hndl_risk: true,
+    reason:
+      "no fraud signals converged | SEPARATE quantum exposure: TLSv1.2, 2048-bit key, no forward secrecy, 210.0MB transferred",
+    ts: "14:18:02",
+  }),
+  mkTxn({
+    txn_id: "33cc4422-0000-40",
+    account: "00008d51",
+    tier: "none",
+    fraud_score: 0.03,
+    graph: 0.0,
+    cyber: 0.03,
+    quantum: 0.0,
+    signals: 0,
+    amount: 1450,
+    reason: "no fraud signals converged",
+    ts: "14:14:47",
+  }),
 ];
 
 const STATS = { scored: 2017255, alerts: 3046, quantum: 199201, p99: 0.05, tput: 21000 };
 
-// ---- convergence meter: the signature element ----
 function ConvergenceMeter({ graph, cyber, quantum, signals, compact }) {
   const lane = (label, val, color, fired) => (
     <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: fired ? 1 : 0.32 }}>
-      <span style={{ width: compact ? 30 : 42, fontSize: 9, letterSpacing: 0.5, color: C.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{label}</span>
+      <span style={{ width: compact ? 30 : 42, fontSize: 9, letterSpacing: 0.5, color: C.textDim, fontFamily: "'JetBrains Mono',monospace" }}>{label}</span>
       <div style={{ flex: 1, height: compact ? 4 : 6, background: C.bg, borderRadius: 2, overflow: "hidden", position: "relative" }}>
         <div style={{ position: "absolute", inset: 0, width: `${val * 100}%`, background: color, borderRadius: 2, transition: "width .4s ease" }} />
       </div>
-      <span style={{ width: 26, textAlign: "right", fontSize: 10, color: fired ? color : C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>{val.toFixed(2)}</span>
+      <span style={{ width: 26, textAlign: "right", fontSize: 10, color: fired ? color : C.textFaint, fontFamily: "'JetBrains Mono',monospace" }}>{val.toFixed(2)}</span>
     </div>
   );
   return (
@@ -95,7 +274,7 @@ function ConvergenceMeter({ graph, cyber, quantum, signals, compact }) {
       {lane("CYBER", cyber, C.cyber, cyber >= 0.3)}
       {!compact && lane("QUANT", quantum, C.quantum, quantum >= 0.6)}
       {!compact && (
-        <div style={{ marginTop: 2, fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", color: signals >= 2 ? C.high : C.textDim }}>
+        <div style={{ marginTop: 2, fontSize: 9, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", color: signals >= 2 ? C.high : C.textDim }}>
           {signals >= 2 ? "◆ CONVERGED — 2 INDEPENDENT FRAUD SIGNALS" : "○ SINGLE SIGNAL — BELOW ALERT THRESHOLD"}
         </div>
       )}
@@ -103,46 +282,57 @@ function ConvergenceMeter({ graph, cyber, quantum, signals, compact }) {
   );
 }
 
-// ---- network graph (SVG force-ish static layout for a ring) ----
-function NetworkView({ ring }) {
-  const w = 440, h = 340, cx = w / 2, cy = h / 2;
+// Renders the REAL mule cluster around the selected transaction: the
+// collector (fan-in hub) at the center and the actual sender account IDs
+// currently in its trailing window, as reported by the API's
+// `cluster_details`. There is no static mock ring — with no details, this
+// renders an empty state instead of fabricated nodes.
+function NetworkView({ details }) {
+  const w = 440, h = 320, cx = w / 2, cy = h / 2;
+  const spokeIds = details ? details.sender_account_ids : [];
   const pos = useMemo(() => {
-    const p = {};
-    ring.nodes.forEach((n, i) => {
-      if (n.role === "collector") p[n.id] = { x: cx, y: cy };
-      else if (n.role === "cashout") p[n.id] = { x: cx, y: cy - 130 };
-      else {
-        const spokes = ring.nodes.filter((x) => x.role === "spoke");
-        const idx = spokes.indexOf(n);
-        const ang = (idx / spokes.length) * Math.PI * 2;
-        p[n.id] = { x: cx + Math.cos(ang) * 135, y: cy + Math.sin(ang) * 115 };
-      }
+    if (!details) return {};
+    const p = { collector: { x: cx, y: cy } };
+    spokeIds.forEach((id, idx) => {
+      const ang = (idx / Math.max(spokeIds.length, 1)) * Math.PI * 2;
+      p[id] = { x: cx + Math.cos(ang) * 135, y: cy + Math.sin(ang) * 105 };
     });
     return p;
-  }, [ring]);
+  }, [details]);
 
-  const color = (role, risk) => role === "collector" ? C.high : role === "cashout" ? C.monitor : `rgba(139,127,224,${0.4 + risk * 0.6})`;
-
+  if (!details) {
+    return (
+      <div style={{ height: 280, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: C.textFaint, fontFamily: "'JetBrains Mono',monospace", fontSize: 12, gap: 8 }}>
+        <div style={{ width: 44, height: 44, borderRadius: "50%", border: `1px dashed ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+          ◯
+        </div>
+        No active mule cluster
+        <span style={{ fontSize: 10, color: C.textFaint, maxWidth: 240, textAlign: "center", lineHeight: 1.5 }}>
+          Select a transaction whose receiving account shows fan-in risk to render its real senders and collector.
+        </span>
+      </div>
+    );
+  }
   return (
     <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: "auto" }}>
-      {ring.edges.map((e, i) => {
-        const a = pos[e.from], b = pos[e.to];
-        const big = e.amt > 100000;
-        return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={big ? C.monitor : C.lineHi} strokeWidth={big ? 2 : 1} opacity={big ? 0.8 : 0.5} />;
-      })}
-      {ring.nodes.map((n) => {
-        const p = pos[n.id];
-        const r = n.role === "collector" ? 16 : n.role === "cashout" ? 13 : 8;
+      {spokeIds.map((id) => {
+        const a = pos[id], b = pos.collector;
+        if (!a || !b) return null;
+        const spoke = details.spokes.find((s) => s.account_id === id);
+        const big = spoke && spoke.amount_inr > 100000;
         return (
-          <g key={n.id}>
-            <circle cx={p.x} cy={p.y} r={r} fill={color(n.role, n.risk)} stroke={C.bg} strokeWidth={2} />
-            {(n.role === "collector" || n.role === "cashout") && (
-              <text x={p.x} y={p.y + r + 12} textAnchor="middle" fontSize={9} fill={C.textDim} fontFamily="'JetBrains Mono', monospace">{n.label}</text>
-            )}
-          </g>
+          <line key={id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={big ? C.monitor : C.lineHi} strokeWidth={big ? 2 : 1} opacity={big ? 0.8 : 0.5} />
         );
       })}
-      <text x={cx} y={cy + 4} textAnchor="middle" fontSize={8} fill={C.bg} fontFamily="'JetBrains Mono', monospace" fontWeight="700">HUB</text>
+      <circle cx={pos.collector.x} cy={pos.collector.y} r={16} fill={C.high} stroke={C.bg} strokeWidth={2} />
+      <text x={pos.collector.x} y={pos.collector.y + 16 + 12} textAnchor="middle" fontSize={9} fill={C.textDim} fontFamily="'JetBrains Mono',monospace">
+        {details.collector_account_id}
+      </text>
+      {spokeIds.map((id) => {
+        const p = pos[id];
+        if (!p) return null;
+        return <circle key={id} cx={p.x} cy={p.y} r={8} fill="rgba(139,127,224,0.75)" stroke={C.bg} strokeWidth={2} />;
+      })}
     </svg>
   );
 }
@@ -150,76 +340,145 @@ function NetworkView({ ring }) {
 function StatCard({ label, value, sub, color }) {
   return (
     <div style={{ flex: 1, padding: "12px 14px", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 6 }}>
-      <div style={{ fontSize: 9, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: C.textFaint, marginTop: 4, fontFamily: "'JetBrains Mono', monospace" }}>{sub}</div>}
+      <div style={{ fontSize: 9, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono',monospace", marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: color || C.text, fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: C.textFaint, marginTop: 4, fontFamily: "'JetBrains Mono',monospace" }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Toggle({ on, onClick, label, activeColor }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", fontSize: 10,
+        fontFamily: "'JetBrains Mono',monospace", letterSpacing: 0.5,
+        background: on ? C.panelHi : "transparent", color: on ? C.text : C.textDim,
+        border: `1px solid ${on ? activeColor || C.lineHi : C.line}`, borderRadius: 5, cursor: "pointer",
+      }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: on ? activeColor || C.clear : C.textFaint, boxShadow: on ? `0 0 6px ${activeColor || C.clear}` : "none" }} />
+      {label}
+    </button>
+  );
+}
+
+function MetaRow({ k, v, color }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${C.line}`, fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>
+      <span style={{ color: C.textDim }}>{k}</span>
+      <span style={{ color: color || C.text }}>{v}</span>
     </div>
   );
 }
 
 export default function MulePredatorDashboard() {
-  const [alerts, setAlerts] = useState(MOCK_ALERTS);
-  const [selected, setSelected] = useState(MOCK_ALERTS[1]);
-  const [filter, setFilter] = useState("all");
+  const [txns, setTxns] = useState(MOCK_TXNS);
+  const [selected, setSelected] = useState(MOCK_TXNS[0]);
+  const [tierFilter, setTierFilter] = useState("all");
+  const [scopeFilter, setScopeFilter] = useState("all");
   const [live, setLive] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const liveRef = useRef(null);
+  const demoRef = useRef(null);
 
-  // live feed simulation: periodically prepend a new alert (or fetch from API)
+  // LIVE FEED
   useEffect(() => {
-    if (!live) { if (liveRef.current) clearInterval(liveRef.current); return; }
+    if (!live) {
+      if (liveRef.current) clearInterval(liveRef.current);
+      return;
+    }
     liveRef.current = setInterval(async () => {
       if (USE_LIVE_API) {
-        // LIVE SEAM: fetch newest alerts from the API
         try {
-          const r = await fetch(`${API_BASE}/alerts?limit=20`);
+          // LIVE SEAM: rolling window of every scored txn, clean + flagged
+          const r = await fetch(`${API_BASE}/feed?limit=100`);
           const j = await r.json();
-          if (j.alerts) setAlerts(j.alerts.map(mapApiAlert));
-        } catch (e) { /* API not reachable; stay on mock */ }
+          if (j.feed && j.feed.length) setTxns((prev) => mergeApi(j.feed, prev));
+        } catch (e) {
+          /* API unreachable; keep current data */
+        }
       } else {
-        const base = MOCK_ALERTS[Math.floor(Math.random() * MOCK_ALERTS.length)];
-        const now = new Date();
-        const stamp = `07-01 ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-        setAlerts((prev) => [{ ...base, txn_id: Math.random().toString(16).slice(2, 18), ts: stamp }, ...prev].slice(0, 40));
+        const base = MOCK_TXNS[rnd(0, MOCK_TXNS.length - 1)];
+        setTxns((prev) => [{ ...base, txn_id: Math.random().toString(16).slice(2, 18), ts: nowStamp() }, ...prev].slice(0, 120));
       }
     }, 2200);
     return () => clearInterval(liveRef.current);
   }, [live]);
 
-  const filtered = useMemo(() => {
-    const a = filter === "all" ? alerts : alerts.filter((x) => x.tier === filter);
-    return [...a].sort((x, y) => TIER_META[x.tier].order - TIER_META[y.tier].order);
-  }, [alerts, filter]);
+  // DEMO MODE — inject a fabricated high-risk alert every 5s.
+  // These are SIMULATED, not real detections; the UI labels them "SIM" so a
+  // fabricated alert is never mistaken for a genuine one.
+  useEffect(() => {
+    if (!demoMode) {
+      if (demoRef.current) clearInterval(demoRef.current);
+      return;
+    }
+    demoRef.current = setInterval(() => {
+      const hasRing = Math.random() > 0.4;
+      const inj = mkTxn({
+        txn_id: Math.random().toString(16).slice(2, 18),
+        account: Math.random().toString(16).slice(2, 10),
+        tier: "high_priority",
+        fraud_score: +(0.85 + Math.random() * 0.15).toFixed(2),
+        graph: +(0.8 + Math.random() * 0.2).toFixed(2),
+        cyber: +(0.6 + Math.random() * 0.4).toFixed(2),
+        quantum: hasRing && Math.random() > 0.6 ? 0.85 : 0.0,
+        signals: 2,
+        amount: rnd(20000, 150000),
+        new_device: true,
+        reason: "CONVERGED (2 independent signals) — cyber: failed login burst; device/IP churn; graph: extreme fan-in (possible collector/hub)",
+        ts: nowStamp(),
+        cluster_details: hasRing ? mkClusterDetails(Math.random().toString(16).slice(2, 10), rnd(3, 12)) : null,
+        simulated: true,
+      });
+      setTxns((prev) => [inj, ...prev].slice(0, 120));
+    }, 5000);
+    return () => clearInterval(demoRef.current);
+  }, [demoMode]);
+
+  // Two-tier filter: primary scope (all txns / suspicious=1 engine /
+  // flagged=2+ converged engines) narrowed further by the tier sub-filter.
+  const visible = useMemo(() => {
+    let list = txns;
+    if (scopeFilter === "suspicious") list = list.filter((t) => t.signals === 1);
+    else if (scopeFilter === "flagged") list = list.filter((t) => t.signals >= 2);
+    if (tierFilter !== "all") list = list.filter((t) => t.tier === tierFilter);
+    return [...list].sort((a, b) => TIER_META[a.tier].order - TIER_META[b.tier].order);
+  }, [txns, scopeFilter, tierFilter]);
+
+  const quantumFeed = useMemo(
+    () =>
+      txns
+        .filter((t) => t.hndl_risk)
+        .slice(0, 12)
+        .map((t) => ({ account: t.account, tls: t.tls, key: t.key, fs: t.fs, vol: t.vol, score: t.quantum })),
+    [txns],
+  );
+
+  const clusterDetails = selected ? selected.cluster_details : null;
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter',system-ui,sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600;700&display=swap');
-        * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-thumb { background: ${C.line}; border-radius: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-      `}</style>
+        *{box-sizing:border-box;} ::-webkit-scrollbar{width:8px;height:8px;}
+        ::-webkit-scrollbar-thumb{background:${C.line};border-radius:4px;} ::-webkit-scrollbar-track{background:transparent;}`}</style>
 
-      {/* header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: `1px solid ${C.line}`, background: C.panel }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${C.high}, ${C.graph})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700 }}>M</div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: 0.3 }}>MulePredator</div>
-            <div style={{ fontSize: 10, color: C.textDim, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>UPI FRAUD INTELLIGENCE · SOC CONSOLE</div>
+            <div style={{ fontSize: 10, color: C.textDim, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 0.5 }}>UPI FRAUD INTELLIGENCE · SOC CONSOLE</div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: C.textDim }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: live ? C.clear : C.textFaint, boxShadow: live ? `0 0 8px ${C.clear}` : "none" }} />
-            {live ? "LIVE FEED" : "PAUSED"}
-          </div>
-          <button onClick={() => setLive((v) => !v)} style={{ padding: "7px 14px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, background: live ? C.panelHi : C.high, color: live ? C.text : "#fff", border: `1px solid ${live ? C.line : C.high}`, borderRadius: 5, cursor: "pointer", fontWeight: 600 }}>
-            {live ? "◼ STOP" : "▶ START FEED"}
-          </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Toggle on={demoMode} onClick={() => setDemoMode((v) => !v)} label={demoMode ? "DEMO MODE — SIMULATED" : "DEMO MODE"} activeColor={C.monitor} />
+          <Toggle on={live} onClick={() => setLive((v) => !v)} label={live ? "LIVE FEED ON" : "LIVE FEED"} activeColor={C.clear} />
         </div>
       </div>
 
-      {/* stat strip */}
       <div style={{ display: "flex", gap: 12, padding: "16px 22px" }}>
         <StatCard label="TRANSACTIONS SCORED" value={STATS.scored.toLocaleString()} sub="synthetic UPI stream" />
         <StatCard label="CONVERGED ALERTS" value={STATS.alerts.toLocaleString()} sub="2+ signals agree" color={C.high} />
@@ -228,32 +487,65 @@ export default function MulePredatorDashboard() {
         <StatCard label="THROUGHPUT" value={`${(STATS.tput / 1000).toFixed(0)}k/s`} sub="single process" color={C.clear} />
       </div>
 
-      {/* main grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "360px 1fr 300px", gap: 12, padding: "0 22px 22px", alignItems: "start" }}>
-
-        {/* LEFT — alert queue */}
+      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr 300px", gap: 12, padding: "0 22px 22px", alignItems: "start" }}>
         <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden" }}>
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 11, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", color: C.textDim }}>ALERT QUEUE</span>
+          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}` }}>
+            <div style={{ fontSize: 11, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", color: C.textDim, marginBottom: 10 }}>TRANSACTION VIEWER</div>
+            <div style={{ display: "flex", gap: 5, marginBottom: 8, flexWrap: "wrap" }}>
+              {[
+                ["all", "ALL"],
+                ["suspicious", "SUSPICIOUS"],
+                ["flagged", "FLAGGED"],
+              ].map(([k, lbl]) => (
+                <button
+                  key={k}
+                  onClick={() => setScopeFilter(k)}
+                  title={k === "suspicious" ? "flagged by exactly 1 engine" : k === "flagged" ? "converged: 2+ engines agree" : "every transaction, including clean"}
+                  style={{
+                    padding: "5px 9px", fontSize: 9, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 0.5,
+                    background: scopeFilter === k ? C.high : "transparent", color: scopeFilter === k ? "#fff" : C.textDim,
+                    border: `1px solid ${scopeFilter === k ? C.high : C.line}`, borderRadius: 4, cursor: "pointer",
+                  }}
+                >
+                  {lbl}
+                </button>
+              ))}
+            </div>
             <div style={{ display: "flex", gap: 4 }}>
               {["all", "high_priority", "investigate", "monitor"].map((f) => (
-                <button key={f} onClick={() => setFilter(f)} style={{ padding: "3px 7px", fontSize: 9, fontFamily: "'JetBrains Mono', monospace", background: filter === f ? C.panelHi : "transparent", color: filter === f ? C.text : C.textFaint, border: `1px solid ${filter === f ? C.lineHi : "transparent"}`, borderRadius: 4, cursor: "pointer", textTransform: "uppercase" }}>
+                <button
+                  key={f}
+                  onClick={() => setTierFilter(f)}
+                  style={{
+                    padding: "3px 7px", fontSize: 9, fontFamily: "'JetBrains Mono',monospace",
+                    background: tierFilter === f ? C.panelHi : "transparent", color: tierFilter === f ? C.text : C.textFaint,
+                    border: `1px solid ${tierFilter === f ? C.lineHi : "transparent"}`, borderRadius: 4, cursor: "pointer",
+                  }}
+                >
                   {f === "all" ? "ALL" : f === "high_priority" ? "HIGH" : f === "investigate" ? "INV" : "MON"}
                 </button>
               ))}
             </div>
           </div>
-          <div style={{ maxHeight: 560, overflowY: "auto" }}>
-            {filtered.map((a) => {
+          <div style={{ maxHeight: 540, overflowY: "auto" }}>
+            {visible.length === 0 && (
+              <div style={{ padding: "28px 14px", textAlign: "center", color: C.textFaint, fontFamily: "'JetBrains Mono',monospace", fontSize: 11 }}>
+                No transactions match this filter.
+              </div>
+            )}
+            {visible.map((a) => {
               const meta = TIER_META[a.tier];
-              const sel = selected?.txn_id === a.txn_id;
+              const sel = selected && selected.txn_id === a.txn_id;
               return (
                 <div key={a.txn_id} onClick={() => setSelected(a)} style={{ padding: "11px 14px", borderBottom: `1px solid ${C.line}`, borderLeft: `3px solid ${meta.color}`, background: sel ? C.panelHi : "transparent", cursor: "pointer" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.8, color: meta.color, fontFamily: "'JetBrains Mono', monospace" }}>{meta.label}</span>
-                    <span style={{ fontSize: 9, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>{a.ts}</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.8, color: meta.color, fontFamily: "'JetBrains Mono',monospace" }}>
+                      {meta.label}
+                      {a.simulated && <span style={{ color: C.monitor, marginLeft: 6 }}>· SIM</span>}
+                    </span>
+                    <span style={{ fontSize: 9, color: C.textFaint, fontFamily: "'JetBrains Mono',monospace" }}>{a.ts}</span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontFamily: "'JetBrains Mono',monospace" }}>
                     <span style={{ fontSize: 11, color: C.text }}>acct ···{a.account}</span>
                     <span style={{ fontSize: 11, color: C.textDim }}>₹{a.amount.toLocaleString()}</span>
                   </div>
@@ -264,18 +556,36 @@ export default function MulePredatorDashboard() {
           </div>
         </div>
 
-        {/* CENTER — case detail + network */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {selected && (
             <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                 <div>
-                  <div style={{ fontSize: 10, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>CASE DETAIL</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>txn ···{selected.txn_id.slice(-10)}</div>
+                  <div style={{ fontSize: 10, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono',monospace", marginBottom: 4 }}>
+                    TRANSACTION DETAIL {selected.simulated && <span style={{ color: C.monitor }}>· SIMULATED</span>}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "'JetBrains Mono',monospace" }}>txn ···{selected.txn_id.slice(-10)}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 10, color: C.textDim, fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>FRAUD SCORE</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: TIER_META[selected.tier].color, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>{selected.fraud_score.toFixed(2)}</div>
+                  <div style={{ fontSize: 10, color: C.textDim, fontFamily: "'JetBrains Mono',monospace", marginBottom: 4 }}>FRAUD SCORE</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: TIER_META[selected.tier].color, fontFamily: "'JetBrains Mono',monospace", lineHeight: 1 }}>{selected.fraud_score.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px", marginBottom: 16 }}>
+                <div>
+                  <MetaRow k="account" v={"···" + selected.account} />
+                  <MetaRow k="amount" v={"₹" + selected.amount.toLocaleString()} />
+                  <MetaRow k="ip address" v={selected.ip} />
+                  <MetaRow k="device" v={selected.device} color={selected.new_device ? C.monitor : C.text} />
+                  <MetaRow k="new device" v={selected.new_device ? "YES" : "no"} color={selected.new_device ? C.monitor : C.textDim} />
+                </div>
+                <div>
+                  <MetaRow k="TLS version" v={selected.tls} color={selected.tls === "TLSv1.0" ? C.high : selected.tls === "TLSv1.2" ? C.monitor : C.clear} />
+                  <MetaRow k="key size" v={selected.key ? selected.key + "-bit" : "-"} color={selected.key === 1024 ? C.high : C.text} />
+                  <MetaRow k="forward secret" v={selected.fs ? "yes" : "NO"} color={selected.fs ? C.textDim : C.monitor} />
+                  <MetaRow k="data volume" v={selected.vol + " MB"} />
+                  <MetaRow k="HNDL exposure" v={selected.hndl_risk ? "FLAGGED" : "clear"} color={selected.hndl_risk ? C.quantum : C.textDim} />
                 </div>
               </div>
 
@@ -283,58 +593,92 @@ export default function MulePredatorDashboard() {
                 <ConvergenceMeter graph={selected.graph} cyber={selected.cyber} quantum={selected.quantum} signals={selected.signals} />
               </div>
 
-              <div style={{ fontSize: 10, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono', monospace", marginBottom: 8 }}>WHY THIS FIRED</div>
+              <div style={{ fontSize: 10, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono',monospace", marginBottom: 8 }}>WHY THIS FIRED</div>
               <div style={{ fontSize: 13, lineHeight: 1.6, color: C.text, background: C.bg, padding: 14, borderRadius: 6, borderLeft: `3px solid ${TIER_META[selected.tier].color}` }}>
                 {selected.reason}
               </div>
 
               <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                <button style={{ flex: 1, padding: "10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, background: C.high, color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontWeight: 600 }}>BLOCK & ESCALATE</button>
-                <button style={{ flex: 1, padding: "10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, background: C.panelHi, color: C.text, border: `1px solid ${C.lineHi}`, borderRadius: 5, cursor: "pointer" }}>STEP-UP AUTH</button>
-                <button style={{ flex: 1, padding: "10px", fontSize: 11, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, background: "transparent", color: C.textDim, border: `1px solid ${C.line}`, borderRadius: 5, cursor: "pointer" }}>MARK BENIGN</button>
+                <button style={{ flex: 1, padding: "10px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 0.5, background: C.high, color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontWeight: 600 }}>BLOCK & ESCALATE</button>
+                <button style={{ flex: 1, padding: "10px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 0.5, background: C.panelHi, color: C.text, border: `1px solid ${C.lineHi}`, borderRadius: 5, cursor: "pointer" }}>STEP-UP AUTH</button>
+                <button style={{ flex: 1, padding: "10px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", letterSpacing: 0.5, background: "transparent", color: C.textDim, border: `1px solid ${C.line}`, borderRadius: 5, cursor: "pointer" }}>MARK BENIGN</button>
               </div>
             </div>
           )}
 
           <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ fontSize: 10, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono', monospace" }}>NETWORK · MULE CLUSTER</span>
-              <span style={{ fontSize: 10, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>13 accounts · 1 collector · 1 cash-out</span>
+              <span style={{ fontSize: 10, letterSpacing: 1, color: C.textDim, fontFamily: "'JetBrains Mono',monospace" }}>NETWORK · MULE CLUSTER</span>
+              <span style={{ fontSize: 10, color: C.textFaint, fontFamily: "'JetBrains Mono',monospace" }}>
+                {clusterDetails ? `fan-in · ${clusterDetails.sender_account_ids.length} senders` : "no cluster selected"}
+              </span>
             </div>
-            <div style={{ fontSize: 11, color: C.textDim, marginBottom: 8 }}>Star pattern: 11 disposable senders funnel into one collector, then a single large cash-out. The collector is the actionable node.</div>
-            <NetworkView ring={MOCK_RING} />
-            <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 8, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", color: C.textDim }}>
-              <span><span style={{ color: C.high }}>●</span> collector</span>
-              <span><span style={{ color: C.monitor }}>●</span> cash-out</span>
-              <span><span style={{ color: C.graph }}>●</span> mule sender</span>
-              <span><span style={{ color: C.monitor }}>—</span> large transfer</span>
-            </div>
+            {clusterDetails && (
+              <div style={{ fontSize: 11, color: C.textDim, marginBottom: 8 }}>
+                Real senders currently in this collector's trailing window. The collector is the actionable node.
+              </div>
+            )}
+            <NetworkView details={clusterDetails} />
+            {clusterDetails && (
+              <>
+                <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 8, fontSize: 10, fontFamily: "'JetBrains Mono',monospace", color: C.textDim }}>
+                  <span><span style={{ color: C.high }}>●</span> collector</span>
+                  <span><span style={{ color: C.graph }}>●</span> sender</span>
+                  <span><span style={{ color: C.monitor }}>-</span> large transfer</span>
+                </div>
+                <div style={{ marginTop: 10, maxHeight: 160, overflowY: "auto", border: `1px solid ${C.line}`, borderRadius: 6 }}>
+                  {clusterDetails.spokes.map((s, i) => (
+                    <div
+                      key={s.account_id + i}
+                      style={{
+                        display: "flex", justifyContent: "space-between", padding: "6px 10px",
+                        borderBottom: i < clusterDetails.spokes.length - 1 ? `1px solid ${C.line}` : "none",
+                        fontFamily: "'JetBrains Mono',monospace", fontSize: 10,
+                      }}
+                    >
+                      <span style={{ color: C.text }}>{s.account_id}</span>
+                      <span style={{ color: C.textDim }}>→ {clusterDetails.collector_account_id}</span>
+                      <span style={{ color: C.textDim }}>₹{Math.round(s.amount_inr).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* RIGHT — quantum exposure panel (separate axis) */}
         <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden" }}>
           <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}`, borderTop: `2px solid ${C.quantum}` }}>
-            <div style={{ fontSize: 11, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace", color: C.quantum }}>QUANTUM EXPOSURE</div>
-            <div style={{ fontSize: 10, color: C.textDim, marginTop: 4, lineHeight: 1.5 }}>Harvest-now-decrypt-later risk. A <em>separate</em> axis from fraud — flags quantum-vulnerable crypto on high-value flows, not an attack in progress.</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 11, letterSpacing: 1, fontFamily: "'JetBrains Mono',monospace", color: C.quantum }}>QUANTUM EXPOSURE</div>
+              <span style={{ fontSize: 9, color: C.textFaint, fontFamily: "'JetBrains Mono',monospace" }}>{quantumFeed.length} live</span>
+            </div>
+            <div style={{ fontSize: 10, color: C.textDim, marginTop: 4, lineHeight: 1.5 }}>
+              Harvest-now-decrypt-later risk. A <em>separate</em> axis from fraud — flags quantum-vulnerable crypto on high-value flows, not an attack in progress.
+            </div>
           </div>
-          <div style={{ padding: "6px 0" }}>
-            {MOCK_QUANTUM.map((q) => (
-              <div key={q.account} style={{ padding: "11px 14px", borderBottom: `1px solid ${C.line}` }}>
+          <div style={{ padding: "6px 0", maxHeight: 420, overflowY: "auto" }}>
+            {quantumFeed.length === 0 && (
+              <div style={{ padding: "22px 14px", textAlign: "center", color: C.textFaint, fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }}>
+                No quantum-exposed sessions in the current stream.
+              </div>
+            )}
+            {quantumFeed.map((q, i) => (
+              <div key={q.account + i} style={{ padding: "11px 14px", borderBottom: `1px solid ${C.line}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: C.text }}>···{q.account}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: C.quantum, fontFamily: "'JetBrains Mono', monospace" }}>{q.score.toFixed(2)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: C.text }}>···{q.account}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: C.quantum, fontFamily: "'JetBrains Mono',monospace" }}>{q.score.toFixed(2)}</span>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: q.tls === "TLSv1.0" ? C.high : C.monitor, fontFamily: "'JetBrains Mono', monospace" }}>{q.tls}</span>
-                  <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: q.key === 1024 ? C.high : C.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{q.key}-bit</span>
-                  {!q.fs && <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: C.monitor, fontFamily: "'JetBrains Mono', monospace" }}>no-FS</span>}
-                  <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: C.textDim, fontFamily: "'JetBrains Mono', monospace" }}>{q.vol}MB</span>
+                  <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: q.tls === "TLSv1.0" ? C.high : C.monitor, fontFamily: "'JetBrains Mono',monospace" }}>{q.tls}</span>
+                  {q.key && <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: q.key === 1024 ? C.high : C.textDim, fontFamily: "'JetBrains Mono',monospace" }}>{q.key}-bit</span>}
+                  {!q.fs && <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: C.monitor, fontFamily: "'JetBrains Mono',monospace" }}>no-FS</span>}
+                  <span style={{ fontSize: 9, padding: "2px 6px", background: C.bg, borderRadius: 3, color: C.textDim, fontFamily: "'JetBrains Mono',monospace" }}>{q.vol}MB</span>
                 </div>
               </div>
             ))}
           </div>
-          <div style={{ padding: "12px 14px", fontSize: 10, color: C.textFaint, lineHeight: 1.5, fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ padding: "12px 14px", fontSize: 10, color: C.textFaint, lineHeight: 1.5, fontFamily: "'JetBrains Mono',monospace" }}>
             Aligns with NIST PQC migration guidance. Flags where sensitive value moves over crypto a future quantum computer could break.
           </div>
         </div>
@@ -343,19 +687,27 @@ export default function MulePredatorDashboard() {
   );
 }
 
-// LIVE SEAM: shape an API /alerts item into the dashboard's alert shape
-function mapApiAlert(a) {
-  return {
-    txn_id: String(a.txn_id).slice(0, 16),
-    account: String(a.account_id || a.account_id_from || "").slice(-8),
-    tier: a.alert_tier,
-    fraud_score: a.fraud_score,
-    graph: a.graph_risk_score,
-    cyber: a.cyber_risk_score,
-    quantum: a.quantum_exposure_score,
-    signals: a.n_fraud_signals,
-    amount: Math.round(a.amount_inr || 0),
-    reason: a.reason,
-    ts: new Date().toISOString().slice(5, 19).replace("T", " "),
-  };
+// LIVE SEAM: merge API /feed items into the txn stream, de-duping by id
+function mergeApi(apiTxns, prev) {
+  const seen = new Set(prev.map((p) => p.txn_id));
+  const mapped = apiTxns
+    .filter((a) => !seen.has(String(a.txn_id)))
+    .map((a) =>
+      mkTxn({
+        txn_id: String(a.txn_id),
+        account: String(a.account_id || a.account_id_from || "").slice(-8),
+        tier: a.alert_tier || "none",
+        fraud_score: a.fraud_score ?? 0,
+        graph: a.graph_risk_score ?? 0,
+        cyber: a.cyber_risk_score ?? 0,
+        quantum: a.quantum_exposure_score ?? 0,
+        signals: a.n_fraud_signals ?? 0,
+        amount: Math.round(a.amount_inr || 0),
+        hndl_risk: (a.quantum_exposure_score ?? 0) >= 0.6,
+        reason: a.reason || "",
+        cluster_details: a.cluster_details || null,
+        ts: nowStamp(),
+      }),
+    );
+  return [...mapped, ...prev].slice(0, 120);
 }

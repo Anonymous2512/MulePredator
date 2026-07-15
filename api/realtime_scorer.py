@@ -65,6 +65,10 @@ SIGNAL_PRESENCE_THRESHOLD = 0.3
 ALERT_SCORE_THRESHOLD = 0.5
 QUANTUM_EXPOSURE_ALERT = 0.6
 
+# cluster view: minimum distinct senders in the trailing window before a
+# collector's inbound fan-in is worth rendering as a live cluster
+HUB_FANIN_MIN = 3
+
 
 @dataclass
 class Transaction:
@@ -177,6 +181,33 @@ class RealtimeScorer:
         reason += f", {txn.data_volume_mb:.1f}MB transferred"
         return score, reason
 
+    def _cluster_details(self, txn: Transaction) -> dict[str, Any] | None:
+        """If the RECEIVER of this transaction looks like a fan-in hub
+        (collector), return the real senders (spokes) currently in its
+        trailing window so the dashboard can render the actual mule cluster
+        instead of a static mock ring."""
+        hub_id = txn.account_id_to
+        hub_score = self.graph_scores.get(hub_id, 0.0)
+        hub_reason = self.graph_reasons.get(hub_id, "")
+        if hub_score < SIGNAL_PRESENCE_THRESHOLD or "fan-in" not in hub_reason:
+            return None
+        r = self.state.get(hub_id)
+        if r is None:
+            return None
+        spokes = [
+            {"account_id": acct_id, "amount_inr": amt, "timestamp": ts.isoformat()}
+            for ts, amt, acct_id in r.inbound
+        ]
+        sender_ids = sorted({s["account_id"] for s in spokes})
+        if len(sender_ids) < HUB_FANIN_MIN:
+            return None
+        return {
+            "collector_account_id": hub_id,
+            "collector_graph_risk_score": round(hub_score, 4),
+            "sender_account_ids": sender_ids,
+            "spokes": spokes,
+        }
+
     def score(self, txn: Transaction) -> dict[str, Any]:
         t0 = time.perf_counter()
         self._update_state(txn)
@@ -217,10 +248,13 @@ class RealtimeScorer:
         if quantum_alert:
             reason += f" | SEPARATE quantum exposure: {quantum_reason}"
 
+        cluster_details = self._cluster_details(txn)
+
         latency_ms = (time.perf_counter() - t0) * 1000
         return {
             "txn_id": txn.txn_id,
             "account_id": txn.account_id_from,
+            "cluster_details": cluster_details,
             "decision": "block" if tier == "high_priority" else "step_up" if alert else "allow",
             "alert": alert,
             "alert_tier": tier,
