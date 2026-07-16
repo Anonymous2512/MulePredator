@@ -42,7 +42,7 @@
       const USE_LIVE_API = true;
       const API_BASE = "http://localhost:8000";
 
-      const C = {
+      const LIGHT = {
         bg: "#EEF2F4",
         panel: "#FFFFFF",
         panelHi: "#F5F7F8",
@@ -59,6 +59,24 @@
         graph: "#7A6BD9",
         cyber: "#C96A1F",
       };
+      const DARK = {
+        bg: "#15130F",
+        panel: "#1E1B15",
+        panelHi: "#262219",
+        line: "rgba(154,140,230,0.16)",
+        lineHi: "rgba(154,140,230,0.30)",
+        text: "#EDE8DE",
+        textDim: "#A8A196",
+        textFaint: "#7A7468",
+        monitor: "#D99A3D",
+        high: "#E05A4D",
+        investigate: "#D99A3D",
+        quantum: "#3DB8CE",
+        clear: "#3FAE6A",
+        graph: "#9A8CE6",
+        cyber: "#E08A3D",
+      };
+      let C = { ...LIGHT };
       const TIER_META = {
         high_priority: { label: "HIGH PRIORITY", color: C.high, order: 0 },
         investigate: { label: "INVESTIGATE", color: C.investigate, order: 1 },
@@ -69,6 +87,14 @@
       function rnd(a, b) {
         return Math.floor(Math.random() * (b - a + 1)) + a;
       }
+      function maskAcct(id) {
+        return "···" + String(id).slice(-4);
+      }
+      const ACTION_META = {
+        blocked: { label: "BLOCKED & ESCALATED", color: C.high },
+        stepup: { label: "STEP-UP SENT", color: C.quantum },
+        benign: { label: "MARKED BENIGN", color: C.clear },
+      };
       function nowStamp() {
         const d = new Date();
         return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
@@ -93,15 +119,15 @@
       // shape the API returns, just fabricated so offline demo mode has
       // something to render through the one real NetworkView code path.
       function mkClusterDetails(collectorLabel, n) {
+        const senderIds = Array.from({ length: n }, () =>
+          Math.random().toString(16).slice(2, 10),
+        );
         return {
           collector_account_id: collectorLabel,
           collector_graph_risk_score: 0.8 + Math.random() * 0.2,
-          sender_account_ids: Array.from(
-            { length: n },
-            (_, i) => `sender_${i}`,
-          ),
-          spokes: Array.from({ length: n }, (_, i) => ({
-            account_id: `sender_${i}`,
+          sender_account_ids: senderIds,
+          spokes: senderIds.map((id) => ({
+            account_id: id,
             amount_inr: 8000 + rnd(0, 40000),
             timestamp: new Date().toISOString(),
           })),
@@ -383,18 +409,20 @@
 
       function NetworkView({ details }) {
         const w = 440,
-          h = 320,
+          h = 340,
           cx = w / 2,
-          cy = h / 2;
+          cy = h / 2 - 8;
         const spokeIds = details ? details.sender_account_ids : [];
         const pos = useMemo(() => {
           if (!details) return {};
           const p = { collector: { x: cx, y: cy } };
           spokeIds.forEach((id, idx) => {
-            const ang = (idx / Math.max(spokeIds.length, 1)) * Math.PI * 2;
+            const ang =
+              (idx / Math.max(spokeIds.length, 1)) * Math.PI * 2 -
+              Math.PI / 2;
             p[id] = {
-              x: cx + Math.cos(ang) * 135,
-              y: cy + Math.sin(ang) * 105,
+              x: cx + Math.cos(ang) * 150,
+              y: cy + Math.sin(ang) * 118,
             };
           });
           return p;
@@ -476,30 +504,53 @@
               fill={C.high}
               stroke={C.bg}
               strokeWidth={2}
-            />
+            >
+              <title>{"collector · " + details.collector_account_id}</title>
+            </circle>
             <text
               x={pos.collector.x}
               y={pos.collector.y + 16 + 12}
               textAnchor="middle"
-              fontSize={9}
-              fill={C.textDim}
+              fontSize={10}
+              fontWeight={600}
+              fill={C.text}
               fontFamily="'JetBrains Mono',monospace"
             >
-              {details.collector_account_id}
+              {maskAcct(details.collector_account_id)}
             </text>
             {spokeIds.map((id) => {
               const p = pos[id];
               if (!p) return null;
+              const spoke = details.spokes.find((s) => s.account_id === id);
+              const big = spoke && spoke.amount_inr > 100000;
               return (
-                <circle
-                  key={id}
-                  cx={p.x}
-                  cy={p.y}
-                  r={8}
-                  fill={`rgba(122,107,217,0.55)`}
-                  stroke={C.bg}
-                  strokeWidth={2}
-                />
+                <g key={id}>
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r={big ? 9 : 7}
+                    fill={big ? C.monitor : C.graph}
+                    stroke={C.bg}
+                    strokeWidth={2}
+                  >
+                    <title>
+                      {maskAcct(id) +
+                        (spoke
+                          ? ` · ₹${Math.round(spoke.amount_inr).toLocaleString()}`
+                          : "")}
+                    </title>
+                  </circle>
+                  <text
+                    x={p.x}
+                    y={p.y + (p.y >= cy ? 20 : -14)}
+                    textAnchor="middle"
+                    fontSize={9}
+                    fill={C.textDim}
+                    fontFamily="'JetBrains Mono',monospace"
+                  >
+                    {maskAcct(id)}
+                  </text>
+                </g>
               );
             })}
           </svg>
@@ -613,6 +664,30 @@
         const [scopeFilter, setScopeFilter] = useState("all");
         const [live, setLive] = useState(false);
         const [demoMode, setDemoMode] = useState(false);
+        const [theme, setTheme] = useState(() =>
+          window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light",
+        );
+        const [txnActions, setTxnActions] = useState({});
+        Object.assign(C, theme === "dark" ? DARK : LIGHT);
+        TIER_META.high_priority.color = C.high;
+        TIER_META.investigate.color = C.investigate;
+        TIER_META.monitor.color = C.monitor;
+        TIER_META.none.color = C.clear;
+        ACTION_META.blocked.color = C.high;
+        ACTION_META.stepup.color = C.quantum;
+        ACTION_META.benign.color = C.clear;
+        useEffect(() => {
+          document.body.style.background = C.bg;
+        }, [theme]);
+        function actOn(txnId, action) {
+          setTxnActions((prev) => ({
+            ...prev,
+            [txnId]: { action, ts: nowStamp() },
+          }));
+        }
         const liveRef = useRef(null);
         const demoRef = useRef(null);
 
@@ -717,6 +792,7 @@
         );
 
         const clusterDetails = selected ? selected.cluster_details : null;
+        const takenAction = selected ? txnActions[selected.txn_id] : null;
 
         return (
           <div
@@ -792,6 +868,14 @@
                   label={live ? "LIVE FEED ON" : "LIVE FEED"}
                   activeColor={C.clear}
                 />
+                <Toggle
+                  on={theme === "dark"}
+                  onClick={() =>
+                    setTheme((t) => (t === "dark" ? "light" : "dark"))
+                  }
+                  label={theme === "dark" ? "DARK MODE" : "LIGHT MODE"}
+                  activeColor={C.graph}
+                />
               </div>
             </div>
 
@@ -833,7 +917,8 @@
                 gridTemplateColumns: "380px 1fr 300px",
                 gap: 12,
                 padding: "0 22px 22px",
-                alignItems: "start",
+                alignItems: "stretch",
+                height: 700,
               }}
             >
               <div
@@ -842,6 +927,9 @@
                   border: `1px solid ${C.line}`,
                   borderRadius: 8,
                   overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
                 }}
               >
                 <div
@@ -931,7 +1019,7 @@
                     )}
                   </div>
                 </div>
-                <div style={{ maxHeight: 540, overflowY: "auto" }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
                   {visible.length === 0 && (
                     <div
                       style={{
@@ -993,6 +1081,18 @@
                                 · CONVERGED
                               </span>
                             )}
+                            {txnActions[a.txn_id] && (
+                              <span
+                                style={{
+                                  color:
+                                    ACTION_META[txnActions[a.txn_id].action]
+                                      .color,
+                                  marginLeft: 6,
+                                }}
+                              >
+                                · {ACTION_META[txnActions[a.txn_id].action].label}
+                              </span>
+                            )}
                           </span>
                           <span
                             style={{
@@ -1033,7 +1133,13 @@
               </div>
 
               <div
-                style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  minHeight: 0,
+                  overflowY: "auto",
+                }}
               >
                 {selected && (
                   <div
@@ -1229,6 +1335,8 @@
 
                     <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
                       <button
+                        disabled={!!takenAction}
+                        onClick={() => actOn(selected.txn_id, "blocked")}
                         style={{
                           flex: 1,
                           padding: "10px",
@@ -1239,13 +1347,16 @@
                           color: "#fff",
                           border: "none",
                           borderRadius: 5,
-                          cursor: "pointer",
+                          cursor: takenAction ? "default" : "pointer",
                           fontWeight: 600,
+                          opacity: takenAction ? 0.4 : 1,
                         }}
                       >
                         BLOCK & ESCALATE
                       </button>
                       <button
+                        disabled={!!takenAction}
+                        onClick={() => actOn(selected.txn_id, "stepup")}
                         style={{
                           flex: 1,
                           padding: "10px",
@@ -1256,12 +1367,15 @@
                           color: C.text,
                           border: `1px solid ${C.lineHi}`,
                           borderRadius: 5,
-                          cursor: "pointer",
+                          cursor: takenAction ? "default" : "pointer",
+                          opacity: takenAction ? 0.4 : 1,
                         }}
                       >
                         STEP-UP AUTH
                       </button>
                       <button
+                        disabled={!!takenAction}
+                        onClick={() => actOn(selected.txn_id, "benign")}
                         style={{
                           flex: 1,
                           padding: "10px",
@@ -1272,12 +1386,26 @@
                           color: C.textDim,
                           border: `1px solid ${C.line}`,
                           borderRadius: 5,
-                          cursor: "pointer",
+                          cursor: takenAction ? "default" : "pointer",
+                          opacity: takenAction ? 0.4 : 1,
                         }}
                       >
                         MARK BENIGN
                       </button>
                     </div>
+                    {takenAction && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          fontSize: 11,
+                          fontFamily: "'JetBrains Mono',monospace",
+                          color: ACTION_META[takenAction.action].color,
+                        }}
+                      >
+                        ✓ {ACTION_META[takenAction.action].label} at{" "}
+                        {takenAction.ts}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1336,23 +1464,56 @@
                       <div
                         style={{
                           display: "flex",
-                          gap: 16,
-                          justifyContent: "center",
-                          marginTop: 8,
+                          gap: 18,
+                          marginTop: 10,
+                          paddingTop: 10,
+                          borderTop: `1px solid ${C.line}`,
                           fontSize: 10,
                           fontFamily: "'JetBrains Mono',monospace",
                           color: C.textDim,
                         }}
                       >
-                        <span>
-                          <span style={{ color: C.high }}>●</span> collector
+                        <span
+                          style={{ display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              background: C.high,
+                              display: "inline-block",
+                            }}
+                          />
+                          collector
                         </span>
-                        <span>
-                          <span style={{ color: C.graph }}>●</span> sender
+                        <span
+                          style={{ display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              background: C.graph,
+                              display: "inline-block",
+                            }}
+                          />
+                          sender
                         </span>
-                        <span>
-                          <span style={{ color: C.monitor }}>-</span> large
-                          transfer
+                        <span
+                          style={{ display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              background: C.monitor,
+                              display: "inline-block",
+                            }}
+                          />
+                          large transfer
                         </span>
                       </div>
                       <div
@@ -1368,8 +1529,9 @@
                           <div
                             key={s.account_id + i}
                             style={{
-                              display: "flex",
-                              justifyContent: "space-between",
+                              display: "grid",
+                              gridTemplateColumns: "1fr auto 1fr",
+                              alignItems: "center",
                               padding: "6px 10px",
                               borderBottom:
                                 i < clusterDetails.spokes.length - 1
@@ -1379,13 +1541,13 @@
                               fontSize: 10,
                             }}
                           >
-                            <span style={{ color: C.text }}>
-                              {s.account_id}
+                            <span style={{ color: C.text, textAlign: "left" }}>
+                              {maskAcct(s.account_id)}
                             </span>
-                            <span style={{ color: C.textDim }}>
-                              → {clusterDetails.collector_account_id}
+                            <span style={{ color: C.textDim, textAlign: "center" }}>
+                              → {maskAcct(clusterDetails.collector_account_id)}
                             </span>
-                            <span style={{ color: C.textDim }}>
+                            <span style={{ color: C.textDim, textAlign: "right" }}>
                               ₹{Math.round(s.amount_inr).toLocaleString()}
                             </span>
                           </div>
@@ -1402,6 +1564,9 @@
                   border: `1px solid ${C.line}`,
                   borderRadius: 8,
                   overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
                 }}
               >
                 <div
@@ -1454,7 +1619,8 @@
                 <div
                   style={{
                     padding: "6px 0",
-                    maxHeight: 420,
+                    flex: 1,
+                    minHeight: 0,
                     overflowY: "auto",
                   }}
                 >
