@@ -4,6 +4,11 @@ Real-time UPI mule/fraud detection pipeline + SOC dashboard. Core thesis:
 alert on **convergence** (2+ independent engines agreeing), not single
 weak signals. Full architecture and roadmap ideas: [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md).
 
+**Doc sync rule**: whenever this file (`CLAUDE.md`) is updated, update
+`README.md` and `MEMORY.md` in the same change — `README.md` so it keeps
+matching what's actually true of the repo, `MEMORY.md` with a dated entry
+recording what changed and why.
+
 ## Architecture split (read this before touching scoring logic)
 
 - **Offline/batch** (`data-generator/`, `engines/*.py`): synthesizes data,
