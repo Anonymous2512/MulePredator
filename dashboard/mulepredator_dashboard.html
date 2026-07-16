@@ -24,7 +24,7 @@
     <style>
       body {
         margin: 0;
-        background: #0f1419;
+        background: #eef2f4;
       }
     </style>
   </head>
@@ -43,21 +43,21 @@
       const API_BASE = "http://localhost:8000";
 
       const C = {
-        bg: "#0F1419",
-        panel: "#171E27",
-        panelHi: "#1E2732",
-        line: "#2A3542",
-        lineHi: "#3A4757",
-        text: "#D6DEE8",
-        textDim: "#7C8A9A",
-        textFaint: "#4E5A68",
-        monitor: "#E0A03C",
-        high: "#E8574A",
-        investigate: "#E0A03C",
-        quantum: "#4ABFD4",
-        clear: "#5FB07A",
-        graph: "#8B7FE0",
-        cyber: "#E8894A",
+        bg: "#EEF2F4",
+        panel: "#FFFFFF",
+        panelHi: "#F5F7F8",
+        line: "rgba(139,127,224,0.18)",
+        lineHi: "rgba(139,127,224,0.32)",
+        text: "#161B21",
+        textDim: "#5B6673",
+        textFaint: "#8993A1",
+        monitor: "#B5790F",
+        high: "#C4362B",
+        investigate: "#B5790F",
+        quantum: "#1592A8",
+        clear: "#1F8A4C",
+        graph: "#7A6BD9",
+        cyber: "#C96A1F",
       };
       const TIER_META = {
         high_priority: { label: "HIGH PRIORITY", color: C.high, order: 0 },
@@ -496,7 +496,7 @@
                   cx={p.x}
                   cy={p.y}
                   r={8}
-                  fill={`rgba(139,127,224,0.75)`}
+                  fill={`rgba(122,107,217,0.55)`}
                   stroke={C.bg}
                   strokeWidth={2}
                 />
@@ -983,6 +983,16 @@
                                 · SIM
                               </span>
                             )}
+                            {a.trigger_type === "Critical Single-Engine Override" && (
+                              <span style={{ color: C.high, marginLeft: 6 }}>
+                                · OVERRIDE
+                              </span>
+                            )}
+                            {a.trigger_type === "Converged" && (
+                              <span style={{ color: C.clear, marginLeft: 6 }}>
+                                · CONVERGED
+                              </span>
+                            )}
                           </span>
                           <span
                             style={{
@@ -1167,6 +1177,31 @@
                       />
                     </div>
 
+                    {selected.trigger_type && selected.trigger_type !== "None" && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          letterSpacing: 1,
+                          color: C.textDim,
+                          fontFamily: "'JetBrains Mono',monospace",
+                          marginBottom: 8,
+                        }}
+                      >
+                        TRIGGER:{" "}
+                        <span
+                          style={{
+                            color:
+                              selected.trigger_type === "Converged"
+                                ? C.clear
+                                : C.high,
+                          }}
+                        >
+                          {selected.trigger_type === "Converged"
+                            ? "CONVERGED"
+                            : "CRITICAL OVERRIDE"}
+                        </span>
+                      </div>
+                    )}
                     <div
                       style={{
                         fontSize: 10,
@@ -1566,6 +1601,7 @@
               cyber: a.cyber_risk_score ?? 0,
               quantum: a.quantum_exposure_score ?? 0,
               signals: a.n_fraud_signals ?? 0,
+              trigger_type: a.trigger_type || "None",
               amount: Math.round(a.amount_inr || 0),
               hndl_risk: (a.quantum_exposure_score ?? 0) >= 0.6,
               reason: a.reason || "",
