@@ -63,6 +63,7 @@ KEY_SIZE_SEVERITY = {1024: 1.0, 2048: 0.6}
 # fusion (from fusion_engine.py)
 SIGNAL_PRESENCE_THRESHOLD = 0.3
 ALERT_SCORE_THRESHOLD = 0.5
+CRITICAL_SCORE_THRESHOLD = 0.90   # single-engine score that bypasses convergence
 QUANTUM_EXPOSURE_ALERT = 0.6
 
 # cluster view: minimum distinct senders in the trailing window before a
@@ -222,7 +223,10 @@ class RealtimeScorer:
         graph_fired = graph_score >= SIGNAL_PRESENCE_THRESHOLD
         cyber_fired = cyber_score >= SIGNAL_PRESENCE_THRESHOLD
         n_signals = int(graph_fired) + int(cyber_fired)
-        alert = (fraud_score >= ALERT_SCORE_THRESHOLD) and (n_signals >= 2)
+        converged = (fraud_score >= ALERT_SCORE_THRESHOLD) and (n_signals >= 2)
+        critical_override = (cyber_score >= CRITICAL_SCORE_THRESHOLD) or (graph_score >= CRITICAL_SCORE_THRESHOLD)
+        alert = converged or critical_override
+        trigger_type = "Converged" if converged else "Critical Single-Engine Override" if critical_override else "None"
         quantum_alert = quantum_score >= QUANTUM_EXPOSURE_ALERT
 
         tier = "none"
@@ -241,8 +245,10 @@ class RealtimeScorer:
             parts.append(f"graph: {graph_reason}")
         if not parts:
             reason = "no fraud signals converged"
-        elif n_signals >= 2:
+        elif converged:
             reason = f"CONVERGED ({n_signals} independent signals) -- " + "; ".join(parts)
+        elif critical_override:
+            reason = f"CRITICAL OVERRIDE (single-engine score >= {CRITICAL_SCORE_THRESHOLD}) -- " + "; ".join(parts)
         else:
             reason = "single signal only -- " + "; ".join(parts)
         if quantum_alert:
@@ -260,6 +266,7 @@ class RealtimeScorer:
             "alert_tier": tier,
             "fraud_score": round(fraud_score, 4),
             "n_fraud_signals": n_signals,
+            "trigger_type": trigger_type,
             "graph_risk_score": round(graph_score, 4),
             "cyber_risk_score": round(cyber_score, 4),
             "quantum_exposure_score": round(quantum_score, 4),

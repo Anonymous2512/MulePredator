@@ -31,7 +31,8 @@ Outputs per transaction:
   - fraud_score          : 0-1, graph+cyber combined (the mule/ATO signal)
   - quantum_exposure_score : 0-1, passed through (separate risk axis)
   - n_fraud_signals      : how many independent fraud signals fired (0-2)
-  - alert                : bool, fraud_score high AND convergence met
+  - trigger_type         : "Converged" / "Critical Single-Engine Override" / "None"
+  - alert                : bool, convergence met OR a critical single-engine override
   - alert_tier           : none / monitor / investigate / high_priority
   - reason               : human-readable explanation string
 
@@ -54,6 +55,7 @@ import pandas as pd
 
 SIGNAL_PRESENCE_THRESHOLD = 0.3   # a score above this counts as "this signal fired"
 ALERT_SCORE_THRESHOLD = 0.5       # fraud_score must clear this to alert
+CRITICAL_SCORE_THRESHOLD = 0.90   # single-engine score that bypasses convergence
 QUANTUM_EXPOSURE_ALERT = 0.6      # separate quantum posture alert threshold
 
 
@@ -95,8 +97,14 @@ def main() -> None:
     df["cyber_fired"] = df["cyber_risk_score"] >= SIGNAL_PRESENCE_THRESHOLD
     df["n_fraud_signals"] = df["graph_fired"].astype(int) + df["cyber_fired"].astype(int)
 
-    # --- alert logic: high score AND convergence ---
-    df["alert"] = (df["fraud_score"] >= ALERT_SCORE_THRESHOLD) & (df["n_fraud_signals"] >= 2)
+    # --- alert logic: convergence (2+ signals) OR a critical single-engine override ---
+    df["converged"] = (df["fraud_score"] >= ALERT_SCORE_THRESHOLD) & (df["n_fraud_signals"] >= 2)
+    df["critical_override"] = (df["cyber_risk_score"] >= CRITICAL_SCORE_THRESHOLD) | (df["graph_risk_score"] >= CRITICAL_SCORE_THRESHOLD)
+    df["alert"] = df["converged"] | df["critical_override"]
+    df["trigger_type"] = np.where(
+        df["converged"], "Converged",
+        np.where(df["critical_override"], "Critical Single-Engine Override", "None"),
+    )
 
     # --- tiering: gives analysts a triage order rather than a binary ---
     df["alert_tier"] = "none"
@@ -120,8 +128,10 @@ def main() -> None:
             parts.append(f"graph: {graph_txt}")
         if not parts:
             base = "no fraud signals converged"
-        elif row["n_fraud_signals"] >= 2:
+        elif row["converged"]:
             base = f"CONVERGED ({row['n_fraud_signals']} independent signals) -- " + "; ".join(parts)
+        elif row["critical_override"]:
+            base = f"CRITICAL OVERRIDE (single-engine score >= {CRITICAL_SCORE_THRESHOLD}) -- " + "; ".join(parts)
         else:
             base = "single signal only -- " + "; ".join(parts)
         if row["quantum_alert"]:
@@ -138,7 +148,7 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     out_cols = ["txn_id", "account_id_from", "timestamp", "amount_inr",
-                "fraud_score", "n_fraud_signals", "alert", "alert_tier",
+                "fraud_score", "n_fraud_signals", "trigger_type", "alert", "alert_tier",
                 "graph_risk_score", "cyber_risk_score", "quantum_exposure_score", "quantum_alert", "reason"]
     out_path = args.output_dir / "fusion_scores.csv"
     df[out_cols].to_csv(out_path, index=False)
